@@ -1,0 +1,171 @@
+# Changelog
+
+Tất cả thay đổi đáng chú ý của dự án Cortex sẽ được ghi lại tại đây.
+
+Định dạng dựa trên [Keep a Changelog](https://keepachangelog.com/vi/1.1.0/),
+và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
+
+## [2.0.0] - 2026-03-03
+
+### Thêm mới
+
+#### Sprint 13 — Memory Architecture (Letta/MemGPT)
+- **3-tier Memory System** — Core Memory (user profile, preferences, coding style), Archival Memory (semantic search, long-term knowledge), Recall Memory (conversation history)
+- Memory Database — SQLite schema với migration support, embedding-based search
+- Memory Manager — orchestration layer kết nối 3 tiers
+- Memory Dashboard UI — sliding panel hiển thị/chỉnh sửa core memory, duyệt archival, recall timeline
+- Memory Editor component — inline editing cho core memory sections
+- Memory Store (Zustand) — state management cho toàn bộ memory system
+- Memory IPC bridge — 15 IPC handlers cho CRUD + search + stats + migrate
+
+#### Sprint 14 — Skill Registry & MCP
+- **Skill System** — Plugin architecture với CortexSkill interface (name, version, category, priority, canHandle, execute, healthCheck, getMetrics)
+- Skill Registry — đăng ký, kích hoạt, vô hiệu hóa skills dynamically
+- Skill Router — tự động route queries tới skill phù hợp nhất dựa trên confidence scoring
+- Skill Loader — auto-discovery và khởi tạo skills
+- MCP Client — Model Context Protocol client cho external tool integration
+- MCP Adapter — chuyển đổi MCP server tools thành CortexSkill instances
+- Playwright Adapter — browser automation skill cho web scraping
+- Built-in Skills — cortex-chat (fallback), code-analysis, rag-search, memory-skill
+- Skill Manager UI — sliding panel quản lý skills theo category, toggle active/inactive
+- Skill Config modal — hiển thị metrics, status, dependencies cho từng skill
+- Skill Store (Zustand) — state management cho skill system
+- Skill IPC bridge — 6 IPC handlers cho list/activate/deactivate/execute/route/health
+
+#### Sprint 15 — Advanced RAG
+- **RAG Router** — tự động chọn chiến lược RAG (hybrid, graphrag, fusion, contextual) dựa trên query analysis
+- **GraphRAG Skill** — graph-enhanced retrieval sử dụng code dependency graph, node neighbors
+- **RAG Fusion Skill** — multi-query với Reciprocal Rank Fusion, query variant generation
+- **Contextual Chunking** — enriches chunks với file-level context (imports, exports) trước embedding
+- **Re-embed Engine** — re-embed existing chunks với contextual enrichment, batch processing
+- Graph Database — code dependency graph (nodes, edges, neighbors)
+- Graph Builder — xây dựng code graph từ AST analysis
+
+#### Sprint 16 — Self-Learning
+- **Event Collector** — thu thập behavioral events (message_sent, code_accepted, code_rejected, follow_up patterns)
+- **Feedback Detector** — phát hiện implicit feedback từ user behavior
+- **Learning Database** — lưu trữ training pairs, learned weights
+- **DSPy Bridge** — kết nối tới DSPy framework cho prompt optimization
+- **Prompt Optimizer** — tối ưu hóa prompts dựa trên feedback data
+- Learning Dashboard UI — hiển thị training stats, feedback ratio, compression savings, trigger manual training
+- Learning Store (Zustand) — state management cho learning system
+
+#### Sprint 17 — Efficiency Engine
+- **Semantic Cache** — embedding-based response cache với exact hash + cosine similarity matching (92% threshold)
+- Cache Key generation — hash-based + embedding-based dual lookup
+- **Model Router** — chọn model tối ưu dựa trên query complexity
+- **Model Registry** — quản lý available models với metadata
+- **Cost Tracker** — theo dõi token usage, cost per query, daily costs, cache savings
+- Cost Dashboard UI — hiển thị tổng chi phí, token breakdown, daily chart, semantic cache stats
+- Cost Store (Zustand) — state management cho cost/cache system
+- Cost IPC bridge — 4 IPC handlers cho stats/history/cache
+
+#### Sprint 18 — Agent Mode
+- **ReAct Agent Skill** — reasoning + acting loop cho multi-step tasks (max 10 iterations)
+- **Plan & Execute Skill** — two-phase reasoning: plan 2-6 steps → execute sequentially with code context
+- **Reflexion Skill** — self-evaluating reasoning với iterative improvement (max 3 reflections, score ≥8/10 early stop)
+- **Code Executor** — sandboxed code execution (JavaScript, TypeScript, Python, Bash) via child_process
+- **Terminal** — safe command execution với allowlist (30+ commands), blocked dangerous patterns
+- **Git Actions** — git operations as agent actions (branch, commit, diff, status, log)
+- Agent Panel UI — sliding panel với strategy selector (ReAct/Plan & Execute/Reflexion), live step visualization, abort support
+- Agent IPC bridge — execute + abort handlers với real-time step streaming via IPC events
+
+### Cải tiến
+- Navigation mới — 5 nút V2 (Memory, Skills, Learning, Cost, Agent) trong ChatArea toolbar
+- Version bump lên v2.0.0
+- Kiến trúc tài liệu — CORTEX_V2_ARCHITECTURE.md, CORTEX_V2_STRATEGY.md, CORTEX_V2_SKILL_CATALOG.md, CORTEX_V2_SPRINT_PLAN.md
+
+### Bảo mật
+- Terminal command allowlist — chỉ cho phép 24 safe commands, block patterns nguy hiểm (rm -rf /, sudo, chmod 777, fork bomb)
+- Code execution sandbox — isolated temp directories, auto-cleanup
+- Agent abort mechanism — AbortController cho graceful cancellation
+
+## [1.0.0] - 2026-03-01
+
+### Thêm mới
+
+#### Sprint 9 — Brain Analysis
+- Architecture Analyzer UI — hiển thị module graph, hub files, layers, tech stack
+- Impact Analyzer IPC — phân tích blast radius từ file thay đổi
+- Feature Estimator IPC — ước tính effort dựa trên codebase context
+- Embedder retry logic — exponential backoff (3 retries, 1s/2s/4s)
+- Smart directory tree update — tự động regenerate tree khi sync
+
+#### Sprint 10 — Chat Enhancement & Hardening
+- Slash Commands — `/impact`, `/estimate`, `/architecture`, `/sync`, `/stats` trong chat input
+- Slash command autocomplete UI với popup menu
+- Prompt injection detection — `sanitizePrompt()` tích hợp vào chat:send handler
+- Security audit logging cho prompt injection attempts
+- Sync lock — chống concurrent sync cùng repository
+- GitHub token validation — kiểm tra token còn hiệu lực
+
+#### Sprint 11 — Release Features
+- Auto-updater IPC — kiểm tra phiên bản mới qua GitHub Releases
+- Brain Export/Import IPC — backup/restore brain dưới dạng `.cbx` (JSON + gzip)
+- Onboarding wizard — hướng dẫn 3 bước cho lần sử dụng đầu tiên
+- Brain Dashboard — thống kê brain (files, chunks, conversations, last sync)
+- Version bump lên v1.0.0
+
+#### Sprint 12 — Agentic RAG & Nano-Brain
+- Agentic RAG pipeline — decompose query → iterative hybrid search → relevance boosting → gap detection → confidence scoring
+- Nano-brain integration — tự động init nano-brain khi import repository (local + GitHub)
+- Nano-brain IPC handlers — status, query, collections, embed qua IPC bridge
+- OpenCode/OMO model support — thêm `opencode-*`, `omo-*`, `duo-chat` vào MODEL_RANKING
+- Dynamic proxy credentials — `llm-client.ts` và `embedder.ts` sử dụng dynamic config từ settings thay vì hardcoded
+
+### Bảo mật
+- Prompt injection detection với 15+ regex patterns
+- Tự động sanitize injection wrappers (```system```, [SYSTEM], <<SYS>>)
+- Security audit trail cho mọi prompt injection attempt
+- Sync lock chống race condition khi sync đồng thời
+- GitHub token expiry validation
+- Nano-brain memory isolation — mỗi project sử dụng collection riêng biệt, chống lộ dữ liệu giữa các brain
+
+## [0.8.0] - 2026-03-01
+
+### Thêm mới
+
+#### Core
+- Ứng dụng Electron desktop với React + TypeScript + Tailwind CSS
+- Quản lý dự án (tạo, đổi tên, xóa dự án với brain name riêng biệt)
+- Import repository từ GitHub (public + private với token xác thực)
+- Import repository từ hệ thống file cục bộ
+- Pipeline phân tích code với Tree-sitter (web-tree-sitter)
+
+#### Brain Engine
+- Vector search sử dụng ChromaDB embeddings
+- Hybrid search (vector + keyword fallback)
+- Code chunking với phân tách theo ngôn ngữ
+- Tạo cây thư mục cho mỗi dự án
+- Architecture Analyzer service (module deps, hub files, layers)
+- Impact Analyzer service (phân tích blast radius)
+- Feature Estimate service (ước tính effort)
+- Brain Export/Import service (JSON + gzip)
+
+#### Chat AI
+- Chat AI hai chế độ: PM mode + Engineering mode
+- Streaming phản hồi qua LLM proxy (OpenAI-compatible)
+- Citation Engine — phân tích `[N: file:lines]` từ phản hồi LLM, hiển thị badges
+- Confidence Score — phân tích 🟢🟡🔴 mức độ tin cậy từ phản hồi
+- Lưu trữ cuộc trò chuyện (SQLite + Zustand)
+
+#### Settings & Config
+- Panel cài đặt (proxy URL/key, kiểm tra kết nối, max tokens, context messages, clone depth)
+- Cấu hình context window + max tokens cho LLM
+- Cấu hình clone depth cho Git
+
+#### Infrastructure
+- Hệ thống audit logging (theo dõi mọi hành động người dùng)
+- Sync engine cho repository (GitHub + local, file watcher)
+- Crash recovery handlers (uncaughtException, unhandledRejection)
+- Auto-updater foundation (kiểm tra GitHub releases)
+- IPC bridge với contextIsolation + sandbox
+- Hiển thị phiên bản app trong footer cài đặt
+
+### Bảo mật
+- `contextIsolation: true`, `nodeIntegration: false`
+- Lưu trữ secret mã hóa qua Electron safeStorage (API keys)
+- Audit trail cho mọi hành động quan trọng
+- Phòng chống prompt injection trong system prompts
+- Cách ly bộ nhớ giữa các brain dự án
+- Rate limiting cho API calls

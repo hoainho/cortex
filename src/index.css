@@ -1,0 +1,445 @@
+/* Syntax highlighting for code blocks (rehype-highlight) */
+@import 'highlight.js/styles/github.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Background */
+  --bg-primary: #FAF9F7;
+  --bg-secondary: #F5F4F0;
+  --bg-sidebar: #EEEDE8;
+  --bg-sidebar-hover: #E5E4DF;
+  --bg-sidebar-active: #DDDCD7;
+  --bg-input: #FFFFFF;
+  --bg-message-user: #F5F4F0;
+  --bg-message-ai: transparent;
+
+  /* Text */
+  --text-primary: #1A1A1A;
+  --text-secondary: #6B6560;
+  --text-tertiary: #9B9590;
+  --text-link: #B34A19;
+
+  /* Borders */
+  --border-primary: #E5E4DF;
+  --border-input: #D4D3CE;
+  --border-focus: #B34A19;
+
+  /* Accent */
+  --accent-primary: #B34A19;
+  --accent-hover: #9A3F15;
+  --accent-light: #FEF3ED;
+
+  /* Scrollbar */
+  --scrollbar-thumb: #D4D3CE;
+  --scrollbar-track: transparent;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+
+  /* Sidebar */
+  --sidebar-width: 260px;
+  --sidebar-collapsed-width: 68px;
+  --titlebar-height: 52px;
+
+  /* Status colors */
+  --status-success-bg: #f0fdf4;
+  --status-success-text: #16a34a;
+  --status-success-border: #bbf7d0;
+  --status-warning-bg: #fffbeb;
+  --status-warning-text: #d97706;
+  --status-warning-border: #fde68a;
+  --status-error-bg: #fef2f2;
+  --status-error-text: #dc2626;
+  --status-error-border: #fecaca;
+  --status-info-bg: #eff6ff;
+  --status-info-text: #2563eb;
+  --status-info-border: #bfdbfe;
+  --status-neutral-bg: #f3f4f6;
+  --status-neutral-text: #6b7280;
+
+  /* Tier badge colors */
+  --tier-high-bg: #f0fdf4;
+  --tier-high-text: #16a34a;
+  --tier-mid-bg: #eff6ff;
+  --tier-mid-text: #2563eb;
+  --tier-low-bg: #fffbeb;
+  --tier-low-text: #d97706;
+
+  /* Danger/destructive */
+  --danger-bg: #fef2f2;
+  --danger-text: #dc2626;
+  --danger-hover-bg: #fee2e2;
+
+  /* Tooltip */
+  --tooltip-bg: #1A1A1A;
+  --tooltip-text: #FFFFFF;
+}
+
+/* Dark theme */
+[data-theme="dark"] {
+  /* Background */
+  --bg-primary: #171717;
+  --bg-secondary: #212121;
+  --bg-sidebar: #0D0D0D;
+  --bg-sidebar-hover: #1A1A1A;
+  --bg-sidebar-active: #2A2A2A;
+  --bg-input: #2A2A2A;
+  --bg-message-user: #212121;
+  --bg-message-ai: transparent;
+
+  /* Text */
+  --text-primary: #ECECEC;
+  --text-secondary: #A1A1A1;
+  --text-tertiary: #6B6B6B;
+  --text-link: #D4845A;
+
+  /* Borders */
+  --border-primary: #2E2E2E;
+  --border-input: #3A3A3A;
+  --border-focus: #D4845A;
+
+  /* Accent */
+  --accent-primary: #D4845A;
+  --accent-hover: #E0956B;
+  --accent-light: rgba(212, 132, 90, 0.12);
+
+  /* Scrollbar */
+  --scrollbar-thumb: #3A3A3A;
+  --scrollbar-track: transparent;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
+
+  /* Status colors */
+  --status-success-bg: rgba(34, 197, 94, 0.12);
+  --status-success-text: #4ade80;
+  --status-success-border: rgba(34, 197, 94, 0.25);
+  --status-warning-bg: rgba(245, 158, 11, 0.12);
+  --status-warning-text: #fbbf24;
+  --status-warning-border: rgba(245, 158, 11, 0.25);
+  --status-error-bg: rgba(239, 68, 68, 0.12);
+  --status-error-text: #f87171;
+  --status-error-border: rgba(239, 68, 68, 0.25);
+  --status-info-bg: rgba(59, 130, 246, 0.12);
+  --status-info-text: #60a5fa;
+  --status-info-border: rgba(59, 130, 246, 0.25);
+  --status-neutral-bg: rgba(255, 255, 255, 0.06);
+  --status-neutral-text: #737373;
+
+  /* Tier badge colors */
+  --tier-high-bg: rgba(34, 197, 94, 0.12);
+  --tier-high-text: #4ade80;
+  --tier-mid-bg: rgba(59, 130, 246, 0.12);
+  --tier-mid-text: #60a5fa;
+  --tier-low-bg: rgba(245, 158, 11, 0.12);
+  --tier-low-text: #fbbf24;
+
+  /* Danger/destructive */
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --danger-text: #f87171;
+  --danger-hover-bg: rgba(239, 68, 68, 0.2);
+
+  /* Tooltip */
+  --tooltip-bg: #ECECEC;
+  --tooltip-text: #171717;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar — subtle like Claude */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* Titlebar drag region */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Selection color */
+::selection {
+  background-color: var(--accent-light);
+  color: var(--text-primary);
+}
+
+*, *::before, *::after {
+  transition-property: background-color, border-color, color, opacity, transform, box-shadow;
+  transition-duration: 100ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+/* Disable transitions on layout properties to avoid jank */
+.no-transition {
+  transition: none !important;
+}
+
+/* Focus visible for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Message animation */
+@keyframes messageIn {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-enter {
+  animation: messageIn 0.3s ease-out forwards;
+}
+
+/* Typing cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.typing-cursor::after {
+  content: '▊';
+  display: inline;
+  color: var(--accent-primary);
+  animation: blink 1s step-end infinite;
+  font-size: 14px;
+  margin-left: 1px;
+}
+
+/* Skeleton shimmer for loading state */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--bg-sidebar-hover) 50%, var(--bg-secondary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes streamFadeIn {
+  0% { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.stream-fade-in {
+  animation: streamFadeIn 0.25s ease-out forwards;
+}
+
+/* Code blocks */
+pre, code {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+pre {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+code {
+  background-color: var(--bg-secondary);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 13px;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* Prose styles for assistant messages */
+.prose-cortex > *:first-child {
+  margin-top: 0;
+}
+
+.prose-cortex > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Ensure tree annotations (→ description) are styled */
+.prose-cortex pre code {
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* ═══════════════════════════════════════════
+ * Ordered list (numbered steps) formatting
+ * ═══════════════════════════════════════════ */
+
+/* Top-level ordered list: numbered steps with circular badges */
+.prose-cortex > ol.cortex-ol {
+  counter-reset: cortex-step;
+  padding-left: 0;
+  list-style: none;
+}
+
+.prose-cortex > ol.cortex-ol > li.cortex-li {
+  counter-increment: cortex-step;
+  position: relative;
+  padding-left: 2.25rem;
+  margin-bottom: 0.625rem;
+}
+
+.prose-cortex > ol.cortex-ol > li.cortex-li::before {
+  content: counter(cortex-step);
+  position: absolute;
+  left: 0;
+  top: 0.15em;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  background: var(--accent-light);
+  color: var(--accent-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* 2nd-level ordered list: lower-alpha (a. b. c.) */
+.prose-cortex ol.cortex-ol ol.cortex-ol {
+  list-style-type: lower-alpha;
+  padding-left: 1.5rem;
+  margin-top: 0.375rem;
+  margin-bottom: 0.25rem;
+}
+
+.prose-cortex ol.cortex-ol ol.cortex-ol > li.cortex-li {
+  padding-left: 0;
+  margin-bottom: 0.25rem;
+}
+
+.prose-cortex ol.cortex-ol ol.cortex-ol > li.cortex-li::before {
+  content: none;
+}
+
+/* 3rd-level ordered list: lower-roman (i. ii. iii.) */
+.prose-cortex ol.cortex-ol ol.cortex-ol ol.cortex-ol {
+  list-style-type: lower-roman;
+  padding-left: 1.5rem;
+}
+
+/* ═══════════════════════════════════════════
+ * Unordered list (bullet) formatting
+ * ═══════════════════════════════════════════ */
+
+/* Top-level unordered list: disc */
+.prose-cortex > ul.cortex-ul {
+  list-style-type: disc;
+}
+
+/* 2nd-level: circle */
+.prose-cortex ul.cortex-ul ul.cortex-ul {
+  list-style-type: circle;
+  padding-left: 1.25rem;
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+/* 3rd-level: square */
+.prose-cortex ul.cortex-ul ul.cortex-ul ul.cortex-ul {
+  list-style-type: square;
+  padding-left: 1.25rem;
+}
+
+/* ═══════════════════════════════════════════
+ * Mixed nesting (ol inside ul or ul inside ol)
+ * ═══════════════════════════════════════════ */
+
+.prose-cortex li.cortex-li > ul.cortex-ul,
+.prose-cortex li.cortex-li > ol.cortex-ol {
+  margin-top: 0.375rem;
+  margin-bottom: 0.25rem;
+}
+
+/* Nested ol inside steps should use alpha, not numbered badges */
+.prose-cortex li.cortex-li > ol.cortex-ol {
+  list-style-type: lower-alpha;
+  padding-left: 1.5rem;
+  counter-reset: none;
+}
+
+.prose-cortex li.cortex-li > ol.cortex-ol > li.cortex-li {
+  padding-left: 0;
+  margin-bottom: 0.25rem;
+}
+
+.prose-cortex li.cortex-li > ol.cortex-ol > li.cortex-li::before {
+  content: none;
+}
+
+/* Dark mode code highlighting override */
+[data-theme="dark"] .hljs {
+  background: var(--bg-secondary) !important;
+  color: #C9D1D9 !important;
+}
+[data-theme="dark"] .hljs-keyword { color: #FF7B72 !important; }
+[data-theme="dark"] .hljs-string { color: #A5D6FF !important; }
+[data-theme="dark"] .hljs-comment { color: #8B949E !important; }
+[data-theme="dark"] .hljs-number { color: #79C0FF !important; }
+[data-theme="dark"] .hljs-function { color: #D2A8FF !important; }
+[data-theme="dark"] .hljs-title { color: #D2A8FF !important; }
+[data-theme="dark"] .hljs-params { color: #C9D1D9 !important; }
+[data-theme="dark"] .hljs-built_in { color: #FFA657 !important; }
+[data-theme="dark"] .hljs-literal { color: #79C0FF !important; }
+[data-theme="dark"] .hljs-type { color: #FFA657 !important; }
+[data-theme="dark"] .hljs-attr { color: #79C0FF !important; }
+[data-theme="dark"] .hljs-selector-class { color: #7EE787 !important; }
+[data-theme="dark"] .hljs-selector-tag { color: #7EE787 !important; }
