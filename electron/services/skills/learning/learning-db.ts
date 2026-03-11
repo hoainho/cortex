@@ -39,6 +39,19 @@ export function initLearningSchema(): void {
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );
     CREATE INDEX IF NOT EXISTS idx_experiments_project ON prompt_experiments(project_id);
+
+    CREATE TABLE IF NOT EXISTS optimized_prompts (
+      id TEXT PRIMARY KEY,
+      skill_name TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      prompt_text TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      metrics TEXT DEFAULT '{}',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      active INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_optprompts_project_skill ON optimized_prompts(project_id, skill_name);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_optprompts_version ON optimized_prompts(project_id, skill_name, version);
   `)
 }
 

@@ -11,6 +11,9 @@ import { sisyphusAgent } from './specialized/sisyphus-agent'
 import { hephaestusAgent } from './specialized/hephaestus-agent'
 import { prometheusAgent } from './specialized/prometheus-agent'
 import { atlasAgent } from './specialized/atlas-agent'
+import { oracleAgent } from './specialized/oracle-agent'
+import { exploreAgent } from './specialized/explore-agent'
+import { librarianAgent } from './specialized/librarian-agent'
 
 export function loadAndRegisterAllAgents(): void {
   const agents = [
@@ -26,6 +29,9 @@ export function loadAndRegisterAllAgents(): void {
     hephaestusAgent,
     prometheusAgent,
     atlasAgent,
+    oracleAgent,
+    exploreAgent,
+    librarianAgent,
   ]
   registerAgents(agents)
   console.log(`[AgentLoader] Registered ${agents.length} specialized agents`)

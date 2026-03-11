@@ -7,6 +7,7 @@ import type {
 import { buildSharedContext } from './agent-context'
 import { executeAgentPool } from './agent-pool'
 import { aggregateResults, detectConflicts, estimateCost } from './result-aggregator'
+import { canDelegate, isReadOnly, getToolWhitelist } from './agent-capabilities'
 
 const INTENT_PATTERNS: Record<IntentType, RegExp[]> = {
   simple_question: [/^(what|how|why|when|where|who|which|can|does|is|are)\b/i],
@@ -40,11 +41,9 @@ const AGENT_TEAM_BY_INTENT: Record<IntentType, AgentRole[]> = {
   complex_analysis: ['review', 'security', 'performance', 'writer', 'formatter']
 }
 
-const ASYNC_AGENTS: AgentRole[] = ['feedback', 'knowledge-crystallizer']
+const ASYNC_AGENTS: AgentRole[] = ['feedback', 'knowledge-crystallizer', 'explore', 'librarian']
 
-// OpenCode-style named agent modes — can be activated via slash commands
-// These are registered in the pool but activated on-demand, not via intent matching
-const NAMED_AGENT_MODES: AgentRole[] = ['sisyphus', 'hephaestus', 'prometheus', 'atlas']
+const NAMED_AGENT_MODES: AgentRole[] = ['sisyphus', 'hephaestus', 'prometheus', 'atlas', 'oracle']
 
 let agentRegistry: Map<AgentRole, AgentDefinition> = new Map()
 
@@ -124,10 +123,17 @@ function buildAgentTasks(
 ): AgentTask[] {
   return team.map(role => {
     const definition = agentRegistry.get(role)!
+    const agentInput: AgentInput = {
+      ...input,
+      constraints: {
+        readOnly: isReadOnly(role),
+        allowedTools: getToolWhitelist(role)
+      }
+    }
     return {
       id: randomUUID(),
       agent: definition,
-      input,
+      input: agentInput,
       status: 'idle' as const
     }
   })
@@ -147,8 +153,16 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
   const intent = classifyIntent(input.query)
   console.log(`[Orchestrator] Intent: ${intent.primaryIntent} (confidence: ${intent.confidence.toFixed(2)}, complexity: ${intent.complexity.toFixed(2)})`)
 
-  const team = selectAgentTeam(intent)
-  console.log(`[Orchestrator] Team: [${team.join(', ')}] (${team.length} agents)`)
+  const rawTeam = selectAgentTeam(intent)
+  const team = rawTeam.filter(role => {
+    if (role === 'sisyphus') return true
+    const delegatable = canDelegate('sisyphus', role)
+    if (!delegatable) {
+      console.log(`[Orchestrator] Filtered out '${role}': delegation not allowed`)
+    }
+    return delegatable
+  })
+  console.log(`[Orchestrator] Team: [${team.join(', ')}] (${team.length}/${rawTeam.length} agents after capability check)`)
 
   let sharedContext: SharedAgentContext
   try {

@@ -8,8 +8,8 @@ import { randomUUID } from 'crypto'
 import { coreMemoryQueries } from './memory-db'
 import type { CoreMemorySection, CoreMemoryEntry, DbCoreMemory } from './types'
 
-const MAX_CORE_TOKENS = 2000
-const MAX_SECTION_TOKENS = 500
+const MAX_CORE_TOKENS = 4000
+const MAX_SECTION_TOKENS = 1000
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)

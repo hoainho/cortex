@@ -103,7 +103,9 @@ const AGENT_MODES: AgentMode[] = [
 ]
 
 interface ChatInputProps {
-  onSend: (message: string, attachments: ChatAttachment[]) => void
+  onSend: (message: string, attachments: ChatAttachment[], agentModeId?: string | null) => void
+  onStop?: () => void
+  isStreaming?: boolean
   disabled?: boolean
   placeholder?: string
 }
@@ -146,14 +148,14 @@ function AttachmentPreview({ attachment, onRemove }: { attachment: ChatAttachmen
   )
 }
 
-export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, isStreaming, disabled, placeholder }: ChatInputProps) {
   const [value, setValue] = useState('')
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const agentPopupRef = useRef<HTMLDivElement>(null)
 
-  const [activeAgentMode, setActiveAgentMode] = useState<AgentMode | null>(null)
+  const [activeAgentMode, setActiveAgentMode] = useState<AgentMode | null>(AGENT_MODES[0])
   const [showAgentPopup, setShowAgentPopup] = useState(false)
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
@@ -232,13 +234,10 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
   const handleSend = useCallback(() => {
     const trimmed = value.trim()
     if ((!trimmed && attachments.length === 0) || disabled) return
-    const messageToSend = activeAgentMode
-      ? activeAgentMode.systemPrefix + trimmed
-      : trimmed
-    onSend(messageToSend, attachments)
+    onSend(trimmed, attachments, activeAgentMode?.id || null)
     setValue('')
     setAttachments([])
-    setActiveAgentMode(null)
+    setActiveAgentMode(AGENT_MODES[0])
     setShowSlashMenu(false)
     setSlashFilter('')
     setShowAgentPopup(false)
@@ -486,20 +485,34 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
             )}
           />
 
-          <button
-            onClick={handleSend}
-            disabled={!canSend || disabled}
-            className={cn(
-              'p-2 rounded-xl shrink-0 mb-0.5',
-              'transition-all duration-100',
-              canSend
-                ? 'bg-[var(--accent-primary)] text-white hover:bg-[var(--accent-hover)] active:scale-95'
-                : 'bg-[var(--bg-secondary)] text-[var(--text-tertiary)]',
-              'disabled:opacity-40 disabled:pointer-events-none'
-            )}
-          >
-            <SendHorizontal size={18} />
-          </button>
+          {isStreaming ? (
+            <button
+              onClick={onStop}
+              className={cn(
+                'p-2 rounded-xl shrink-0 mb-0.5',
+                'transition-all duration-100',
+                'bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-80 active:scale-95'
+              )}
+              title="Dừng phản hồi"
+            >
+              <Square size={16} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!canSend || disabled}
+              className={cn(
+                'p-2 rounded-xl shrink-0 mb-0.5',
+                'transition-all duration-100',
+                canSend
+                  ? 'bg-[var(--accent-primary)] text-white hover:bg-[var(--accent-hover)] active:scale-95'
+                  : 'bg-[var(--bg-secondary)] text-[var(--text-tertiary)]',
+                'disabled:opacity-40 disabled:pointer-events-none'
+              )}
+            >
+              <SendHorizontal size={18} />
+            </button>
+          )}
         </div>
         </div>
 

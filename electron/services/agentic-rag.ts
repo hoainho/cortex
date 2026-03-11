@@ -45,24 +45,17 @@ interface AgenticRAGOptions {
 // Query Decomposition
 // =====================
 
-const DECOMPOSE_PROMPT = `You are a search query decomposer for a code repository Q&A system.
+const DECOMPOSE_SYSTEM = `You decompose user questions into search sub-queries for a code repository.
+CRITICAL: Respond with ONLY a valid JSON array of strings. No explanation, no preamble, no markdown.
+Example: ["auth middleware handler", "database schema model"]`
 
-Given a user question, break it into 1-3 focused search sub-queries that would find the relevant code/documentation.
+const DECOMPOSE_PROMPT = `Break this into 1-3 focused code search sub-queries. Reply with ONLY a JSON array.
 
-Rules:
-- Output ONLY a JSON array of strings, nothing else
-- Each sub-query should target a specific aspect of the question
-- Use technical terms that would appear in code (function names, file names, module names)
-- If the question is already focused, return it as a single-element array
-- Maximum 3 sub-queries
+Examples:
+"How does authentication work and what database?" → ["authentication middleware login handler", "database connection schema model"]
+"What is the project structure?" → ["project directory structure architecture"]
 
-Example input: "How does the authentication work and what database does it use?"
-Example output: ["authentication middleware login handler", "database connection schema model"]
-
-Example input: "What is the project structure?"
-Example output: ["project directory structure architecture"]
-
-User question: `
+Question: `
 
 /**
  * Decompose a complex query into focused sub-queries using a lightweight LLM call.
@@ -73,7 +66,7 @@ async function decomposeQuery(query: string, projectId?: string): Promise<string
     const proxyUrl = getProxyUrl()
     const proxyKey = getProxyKey()
 
-    const enhancedPrompt = projectId
+    const userPrompt = projectId
       ? optimizeDecompositionPrompt(projectId, DECOMPOSE_PROMPT)
       : DECOMPOSE_PROMPT
 
@@ -86,12 +79,13 @@ async function decomposeQuery(query: string, projectId?: string): Promise<string
       body: JSON.stringify({
         model: 'gemini-2.5-flash-lite',
         messages: [
-          { role: 'user', content: enhancedPrompt + query }
+          { role: 'system', content: DECOMPOSE_SYSTEM },
+          { role: 'user', content: userPrompt + query }
         ],
         max_tokens: 200,
         temperature: 0
       }),
-      signal: AbortSignal.timeout(10000) // 10s timeout
+      signal: AbortSignal.timeout(10000)
     })
 
     if (!response.ok) {
@@ -106,23 +100,53 @@ async function decomposeQuery(query: string, projectId?: string): Promise<string
     const content = data.choices?.[0]?.message?.content?.trim()
     if (!content) return [query]
 
-    // Parse JSON array from response — handle markdown code fences
-    const cleaned = content
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/, '')
-      .trim()
-
-    const parsed = JSON.parse(cleaned)
-    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(s => typeof s === 'string')) {
+    const parsed = parseJsonArray(content)
+    if (parsed) {
       console.log(`[AgenticRAG] Decomposed into ${parsed.length} sub-queries: ${parsed.join(' | ')}`)
-      return parsed.slice(0, 3) // Cap at 3
+      return parsed.slice(0, 3)
     }
 
+    console.log('[AgenticRAG] No valid JSON array in decomposition response, using original query')
     return [query]
   } catch (err) {
-    console.warn('[AgenticRAG] Query decomposition failed, using original query:', err)
+    console.warn('[AgenticRAG] Query decomposition failed, using original query:', (err as Error).message)
     return [query]
   }
+}
+
+function parseJsonArray(raw: string): string[] | null {
+  // Strip markdown code fences
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim()
+
+  // Try direct parse first (fast path for well-behaved models)
+  try {
+    const direct = JSON.parse(stripped)
+    if (Array.isArray(direct) && direct.length > 0 && direct.every(s => typeof s === 'string')) {
+      return direct
+    }
+  } catch { /* not pure JSON, try extraction */ }
+
+  // Extract JSON array from surrounding text (handles "Understood, here is the result: [...]")
+  const arrayMatch = stripped.match(/\[[\s\S]*\]/)
+  if (!arrayMatch) return null
+
+  try {
+    const extracted = JSON.parse(arrayMatch[0])
+    if (Array.isArray(extracted) && extracted.length > 0 && extracted.every(s => typeof s === 'string')) {
+      return extracted
+    }
+  } catch { /* malformed JSON array */ }
+
+  // Last resort: extract quoted strings manually (handles broken JSON like ["foo", "bar)
+  const quotedStrings = [...stripped.matchAll(/"([^"]+)"/g)].map(m => m[1]).filter(s => s.length >= 3)
+  if (quotedStrings.length > 0 && quotedStrings.length <= 5) {
+    return quotedStrings.slice(0, 3)
+  }
+
+  return null
 }
 
 // =====================

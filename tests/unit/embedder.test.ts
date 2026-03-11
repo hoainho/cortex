@@ -1,12 +1,14 @@
-const { mockPrepare, mockAll, mockRun, mockTransaction, mockFetch } = vi.hoisted(() => ({
+const { mockPrepare, mockAll, mockRun, mockTransaction } = vi.hoisted(() => ({
   mockPrepare: vi.fn(),
   mockAll: vi.fn().mockReturnValue([]),
   mockRun: vi.fn(),
-  mockTransaction: vi.fn((fn: Function) => fn),
-  mockFetch: vi.fn()
+  mockTransaction: vi.fn((fn: Function) => fn)
 }))
 
-    vi.mock('../../electron/services/db', () => ({
+const mockPipeFn = vi.hoisted(() => vi.fn())
+const mockPipelineFactory = vi.hoisted(() => vi.fn())
+
+vi.mock('../../electron/services/db', () => ({
   getDb: vi.fn().mockReturnValue({
     prepare: mockPrepare.mockReturnValue({
       all: mockAll,
@@ -21,77 +23,80 @@ const { mockPrepare, mockAll, mockRun, mockTransaction, mockFetch } = vi.hoisted
   }
 }))
 
-vi.mock('../../electron/services/settings-service', () => ({
-  getProxyUrl: vi.fn().mockReturnValue('https://proxy.hoainho.info'),
-  getProxyKey: vi.fn().mockReturnValue('hoainho')
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn().mockReturnValue('/tmp/cortex-test-models')
+  }
 }))
 
-vi.stubGlobal('fetch', mockFetch)
+vi.mock('@huggingface/transformers', () => ({
+  pipeline: mockPipelineFactory,
+  env: {
+    cacheDir: '',
+    allowLocalModels: true,
+    allowRemoteModels: true
+  }
+}))
 
-import { embedQuery, embedProjectChunks } from '../../electron/services/embedder'
+async function loadEmbedder() {
+  vi.resetModules()
+  return await import('../../electron/services/embedder')
+}
 
 describe('embedQuery', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockPipeFn.mockResolvedValue({
+      tolist: vi.fn().mockReturnValue([[0.1, 0.2, 0.3]])
+    })
+    mockPipelineFactory.mockResolvedValue(mockPipeFn)
   })
 
-  it('calls embedding API with correct parameters', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        data: [{ embedding: [0.1, 0.2, 0.3], index: 0 }]
-      })
-    })
+  it('calls local embedding pipeline with correct parameters', async () => {
+    const { embedQuery } = await loadEmbedder()
+    const result = await embedQuery('test query')
 
-    await embedQuery('test query')
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://proxy.hoainho.info/v1/embeddings',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer hoainho'
-        })
-      })
+    expect(mockPipelineFactory).toHaveBeenCalledWith(
+      'feature-extraction',
+      'Xenova/all-MiniLM-L6-v2',
+      expect.objectContaining({ dtype: 'fp32' })
     )
-
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body)
-    expect(body.model).toBe('text-embedding-3-small')
-    expect(body.input).toEqual(['test query'])
-    expect(body.dimensions).toBe(1536)
-  })
-
-  it('returns embedding array from API response', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        data: [{ embedding: [0.1, 0.2, 0.3], index: 0 }]
-      })
-    })
-
-    const result = await embedQuery('test')
     expect(result).toEqual([0.1, 0.2, 0.3])
   })
 
-  it('returns empty array on API failure', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      text: async () => 'Server error'
+  it('returns embedding array from pipeline response', async () => {
+    mockPipeFn.mockResolvedValue({
+      tolist: vi.fn().mockReturnValue([[0.5, 0.6, 0.7]])
     })
 
-    await expect(embedQuery('test')).rejects.toThrow('Embedding API error 500')
+    const { embedQuery } = await loadEmbedder()
+    const result = await embedQuery('test')
+    expect(result).toEqual([0.5, 0.6, 0.7])
+  })
+
+  it('returns empty array when pipeline returns empty', async () => {
+    mockPipeFn.mockResolvedValue({
+      tolist: vi.fn().mockReturnValue([])
+    })
+
+    const { embedQuery } = await loadEmbedder()
+    const result = await embedQuery('test')
+    expect(result).toEqual([])
   })
 })
 
 describe('embedProjectChunks', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockPipeFn.mockResolvedValue({
+      tolist: vi.fn().mockReturnValue([[0.1, 0.2, 0.3]])
+    })
+    mockPipelineFactory.mockResolvedValue(mockPipeFn)
   })
 
   it('returns 0 when no chunks need embedding', async () => {
     mockAll.mockReturnValueOnce([])
+    const { embedProjectChunks } = await loadEmbedder()
     const result = await embedProjectChunks('project-1')
     expect(result).toBe(0)
   })
@@ -106,16 +111,13 @@ describe('embedProjectChunks', () => {
     }))
     mockAll.mockReturnValueOnce(chunks)
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: chunks.map((_, i) => ({
-          embedding: [0.1, 0.2, 0.3],
-          index: i
-        }))
-      })
+    mockPipeFn.mockResolvedValue({
+      tolist: vi.fn().mockReturnValue(
+        chunks.map(() => [0.1, 0.2, 0.3])
+      )
     })
 
+    const { embedProjectChunks } = await loadEmbedder()
     const onProgress = vi.fn()
     const result = await embedProjectChunks('project-1', onProgress)
 
@@ -124,7 +126,6 @@ describe('embedProjectChunks', () => {
   })
 
   it('continues processing on batch failure', async () => {
-    // 25 chunks → 2 batches (20 + 5)
     const chunks = Array.from({ length: 25 }, (_, i) => ({
       id: `chunk-${i}`,
       content: `content ${i}`,
@@ -134,21 +135,16 @@ describe('embedProjectChunks', () => {
     }))
     mockAll.mockReturnValueOnce(chunks)
 
-    // First batch fails, second succeeds
-    mockFetch
-      .mockRejectedValueOnce(new Error('Network error'))
+    mockPipeFn
+      .mockRejectedValueOnce(new Error('Pipeline error'))
       .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          data: Array.from({ length: 5 }, (_, i) => ({
-            embedding: [0.1, 0.2],
-            index: i
-          }))
-        })
+        tolist: vi.fn().mockReturnValue(
+          Array.from({ length: 5 }, () => [0.1, 0.2])
+        )
       })
 
+    const { embedProjectChunks } = await loadEmbedder()
     const result = await embedProjectChunks('project-1')
-    // Only second batch succeeded
     expect(result).toBe(5)
   })
 
@@ -162,18 +158,14 @@ describe('embedProjectChunks', () => {
     }))
     mockAll.mockReturnValueOnce(chunks)
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: Array.from({ length: 20 }, (_, i) => ({
-          embedding: [0.1],
-          index: i
-        }))
-      })
+    mockPipeFn.mockResolvedValue({
+      tolist: vi.fn().mockReturnValue(
+        Array.from({ length: 20 }, () => [0.1])
+      )
     })
 
+    const { embedProjectChunks } = await loadEmbedder()
     await embedProjectChunks('project-1')
-    // Should have been called twice (batch of 20 + batch of 5)
-    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(mockPipeFn).toHaveBeenCalledTimes(2)
   })
 })

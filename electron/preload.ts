@@ -59,8 +59,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     query: string,
     mode: string,
     history: Array<{ role: string; content: string }>,
-    attachments?: Array<{ id: string; name: string; path: string; size: number; mimeType: string; isImage: boolean; base64?: string; textContent?: string }>
-  ) => ipcRenderer.invoke('chat:send', projectId, conversationId, query, mode, history, attachments),
+    attachments?: Array<{ id: string; name: string; path: string; size: number; mimeType: string; isImage: boolean; base64?: string; textContent?: string }>,
+    agentMode?: string
+  ) => ipcRenderer.invoke('chat:send', projectId, conversationId, query, mode, history, attachments, agentMode),
   abortChat: (conversationId: string) =>
     ipcRenderer.invoke('chat:abort', conversationId),
 
@@ -116,6 +117,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getActiveModel: () => ipcRenderer.invoke('llm:getActiveModel'),
   getAvailableModels: () => ipcRenderer.invoke('llm:getAvailableModels'),
   refreshModels: () => ipcRenderer.invoke('llm:refreshModels'),
+  refreshModelsWithCheck: () => ipcRenderer.invoke('llm:refreshModelsWithCheck'),
   setModel: (modelId: string) => ipcRenderer.invoke('llm:setModel', modelId),
   getAutoRotation: () => ipcRenderer.invoke('llm:getAutoRotation'),
   setAutoRotation: (enabled: boolean) => ipcRenderer.invoke('llm:setAutoRotation', enabled),
@@ -145,6 +147,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLLMConfig: () => ipcRenderer.invoke('settings:getLLMConfig'),
   setLLMConfig: (maxTokens: number, contextMessages: number) =>
     ipcRenderer.invoke('settings:setLLMConfig', maxTokens, contextMessages),
+  getEmbeddingConfig: () => ipcRenderer.invoke('settings:getEmbeddingConfig'),
+  testEmbeddingConnection: () => ipcRenderer.invoke('settings:testEmbeddingConnection'),
   getGitConfig: () => ipcRenderer.invoke('settings:getGitConfig'),
   setGitConfig: (cloneDepth: number) => ipcRenderer.invoke('settings:setGitConfig', cloneDepth),
   testProxyConnection: (url: string, key: string) =>
@@ -291,4 +295,89 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mcpConnect: (id: string) => ipcRenderer.invoke('mcp:connect', id),
   mcpDisconnect: (id: string) => ipcRenderer.invoke('mcp:disconnect', id),
   mcpHealth: (id: string) => ipcRenderer.invoke('mcp:health', id),
+
+  // V3: Hook System
+  hooksList: () => ipcRenderer.invoke('hooks:list'),
+  hooksEnable: (hookId: string) => ipcRenderer.invoke('hooks:enable', hookId),
+  hooksDisable: (hookId: string) => ipcRenderer.invoke('hooks:disable', hookId),
+  hooksRun: (trigger: string, context: Record<string, unknown>) =>
+    ipcRenderer.invoke('hooks:run', trigger, context),
+
+  // V3: Category Routing
+  routingResolve: (input: { prompt?: string; category?: string; slashCommand?: string }) =>
+    ipcRenderer.invoke('routing:resolve', input),
+  routingRouteModel: (category: string, availableModels: string[]) =>
+    ipcRenderer.invoke('routing:routeModel', category, availableModels),
+
+  // V3: Background Tasks
+  backgroundLaunch: (options: { description: string; category?: string; agentType?: string; provider?: string; priority?: number; metadata?: Record<string, unknown> }) =>
+    ipcRenderer.invoke('background:launch', options),
+  backgroundCancel: (taskId: string) =>
+    ipcRenderer.invoke('background:cancel', taskId),
+  backgroundGet: (taskId: string) =>
+    ipcRenderer.invoke('background:get', taskId),
+  backgroundGetAll: () =>
+    ipcRenderer.invoke('background:getAll'),
+  backgroundGetByStatus: (status: string) =>
+    ipcRenderer.invoke('background:getByStatus', status),
+  backgroundCleanup: (olderThanMs?: number) =>
+    ipcRenderer.invoke('background:cleanup', olderThanMs),
+  backgroundDetectStale: () =>
+    ipcRenderer.invoke('background:detectStale'),
+  backgroundConcurrencyGet: () =>
+    ipcRenderer.invoke('background:concurrency:get'),
+  backgroundConcurrencySet: (config: Record<string, unknown>) =>
+    ipcRenderer.invoke('background:concurrency:set', config),
+
+  onBackgroundTaskEvent: (callback: (data: { type: string; task: Record<string, unknown> }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('background:taskEvent', handler)
+    return () => ipcRenderer.removeListener('background:taskEvent', handler)
+  },
+
+  // V3: Loop Engine
+  loopCreate: (type: 'ralph' | 'ultrawork' | 'boulder', metadata?: Record<string, unknown>) =>
+    ipcRenderer.invoke('loop:create', type, metadata),
+  loopGet: (loopId: string) =>
+    ipcRenderer.invoke('loop:get', loopId),
+  loopGetAll: () =>
+    ipcRenderer.invoke('loop:getAll'),
+  loopGetByStatus: (status: string) =>
+    ipcRenderer.invoke('loop:getByStatus', status),
+  loopPause: (loopId: string) =>
+    ipcRenderer.invoke('loop:pause', loopId),
+  loopResume: (loopId: string) =>
+    ipcRenderer.invoke('loop:resume', loopId),
+  loopCancel: (loopId: string) =>
+    ipcRenderer.invoke('loop:cancel', loopId),
+
+  onLoopEvent: (callback: (data: { type: string; state: Record<string, unknown> }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('loop:event', handler)
+    return () => ipcRenderer.removeListener('loop:event', handler)
+  },
+
+  // V3: Boulder State
+  boulderGet: (loopId: string) =>
+    ipcRenderer.invoke('boulder:get', loopId),
+  boulderGetByProject: (projectId: string) =>
+    ipcRenderer.invoke('boulder:getByProject', projectId),
+  boulderGetAll: () =>
+    ipcRenderer.invoke('boulder:getAll'),
+  boulderRestore: (loopId: string) =>
+    ipcRenderer.invoke('boulder:restore', loopId),
+  boulderDelete: (loopId: string) =>
+    ipcRenderer.invoke('boulder:delete', loopId),
+  boulderUpdateCheckpoint: (loopId: string, checkpoint: Record<string, unknown>) =>
+    ipcRenderer.invoke('boulder:updateCheckpoint', loopId, checkpoint),
+
+  // V3: Agent Capabilities
+  capabilitiesGetAll: () =>
+    ipcRenderer.invoke('capabilities:getAll'),
+  capabilitiesGet: (role: string) =>
+    ipcRenderer.invoke('capabilities:get', role),
+  capabilitiesCanDelegate: (from: string, to: string) =>
+    ipcRenderer.invoke('capabilities:canDelegate', from, to),
+  capabilitiesDelegationHistory: (fromAgent?: string) =>
+    ipcRenderer.invoke('capabilities:delegationHistory', fromAgent),
 })

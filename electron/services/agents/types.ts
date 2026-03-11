@@ -23,6 +23,9 @@ export type AgentRole =
   | 'hephaestus'
   | 'prometheus'
   | 'atlas'
+  | 'oracle'
+  | 'explore'
+  | 'librarian'
 
 export type AgentStatus = 'idle' | 'running' | 'completed' | 'error' | 'skipped'
 
@@ -89,18 +92,16 @@ export interface ActivationRule {
 // =====================
 
 export interface AgentInput {
-  /** Original user query */
   query: string
-  /** Project ID */
   projectId: string
-  /** Conversation ID */
   conversationId?: string
-  /** Shared context loaded by Orchestrator */
   sharedContext: SharedAgentContext
-  /** Specific instructions from Orchestrator */
   instructions?: string
-  /** Chat mode */
   mode?: 'pm' | 'engineering'
+  constraints?: {
+    readOnly: boolean
+    allowedTools: string[]
+  }
 }
 
 export interface SharedAgentContext {
@@ -304,4 +305,44 @@ export interface DbKnowledgeCrystal {
   reinforcement_count: number
   created_at: number
   last_reinforced_at: number
+}
+
+// =====================
+// Agent Capabilities & Delegation (V3)
+// =====================
+
+export interface AgentCapability {
+  role: AgentRole
+  toolWhitelist?: string[]
+  canDelegate: boolean
+  delegateTo?: AgentRole[]
+  maxConcurrentDelegations?: number
+  readOnly: boolean
+  backgroundCapable: boolean
+}
+
+export type DelegationStatus = 'pending' | 'accepted' | 'running' | 'completed' | 'failed' | 'rejected'
+
+export interface DelegationRequest {
+  id: string
+  fromAgent: AgentRole
+  toAgent: AgentRole
+  prompt: string
+  context?: string
+  priority: number
+  createdAt: number
+}
+
+export interface DelegationResult {
+  requestId: string
+  status: DelegationStatus
+  fromAgent: AgentRole
+  toAgent: AgentRole
+  result?: string
+  error?: string
+  durationMs: number
+}
+
+export interface AgentCapabilityMap {
+  [role: string]: AgentCapability
 }

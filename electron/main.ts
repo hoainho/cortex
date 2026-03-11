@@ -8,7 +8,7 @@ import { loadAndRegisterAllAgents } from './services/agents/agent-loader'
 import { orchestrate } from './services/agents/agent-orchestrator'
 import { initNanoBrain, getNanoBrainStatus, queryNanoBrain, listCollections, triggerEmbedding } from './services/nano-brain-service'
 import { randomUUID } from 'crypto'
-import { buildPrompt, streamChatCompletion, fetchAvailableModels, getActiveModel, getAvailableModels, setActiveModel, setMainWindow, getAutoRotation, setAutoRotation, clearAuthFailedModels, type ChatMode, type ChatMessage, type ProjectContext } from './services/llm-client'
+import { buildPrompt, streamChatCompletion, fetchAvailableModels, getActiveModel, getAvailableModels, setActiveModel, setMainWindow, getAutoRotation, setAutoRotation, clearAuthFailedModels, refreshModelsWithCheck, type ChatMode, type ChatMessage, type ProjectContext } from './services/llm-client'
 import { cloneRepository, checkRepoAccess, storeGitHubToken, getGitHubToken, listBranches, getCurrentBranch } from './services/git-service'
 import { syncGithubRepo, syncLocalRepo, startFileWatcher, stopFileWatcher, stopAllWatchers, indexBranch } from './services/sync-engine'
 import { analyzeArchitecture } from './services/architecture-analyzer'
@@ -39,6 +39,7 @@ import { JiraContextSource } from './services/jira-context-source'
 import { ConfluenceContextSource } from './services/confluence-context-source'
 import { GitHubContextSource } from './services/github-context-source'
 import { WebSearchContextSource } from './services/websearch-context-source'
+import { embedQuery, preloadEmbeddingModel, EMBEDDING_DIMENSIONS } from './services/embedder'
 
 // V2: Memory System
 import {
@@ -60,20 +61,62 @@ import { detectWebSearchTrigger, searchWeb, webResultsToChunkContent } from './s
 
 // V2: MCP Manager
 import { listMCPServers, addMCPServer, removeMCPServer, connectMCPServer, disconnectMCPServer, checkMCPServerHealth, shutdownAllMCP, autoConnectMCPServers, getToolDefinitions, executeMCPTool } from './services/skills/mcp/mcp-manager'
+import { getBuiltinToolDefinitions, executeBuiltinTool } from './services/skills/builtin/filesystem-tools'
 
 // V2: Efficiency Engine
-import { initCostSchema, recordUsage, estimateCost } from './services/skills/efficiency/cost-tracker'
+import { initCostSchema, recordUsage, estimateCost, getCompressionStats } from './services/skills/efficiency/cost-tracker'
 import { initCacheSchema, getCachedResponse, cacheResponse, invalidateCacheForQuery } from './services/skills/efficiency/semantic-cache'
 
 // V2: Learning Engine
 import { recordEvent } from './services/skills/learning/event-collector'
 import { optimizePrompt } from './services/skills/learning/prompt-optimizer'
 
+// V3: Hook System
+import {
+  registerHook, unregisterHook, listHooks, enableHook, disableHook, runHooks,
+  registerDefaultHooks
+} from './services/hooks'
+import type { HookTrigger, HookContext } from './services/hooks'
+
+// V3: Category Routing
+import { resolveCategory, routeToModel } from './services/routing'
+import type { TaskCategory } from './services/routing'
+
+// V3: Background Task Manager
+import {
+  launchTask, cancelTask, getTask, getAllTasks, getTasksByStatus,
+  onTaskEvent, cleanupCompleted, detectStaleTasks,
+  configureConcurrency, getConcurrencyConfig,
+  resetBackgroundManager
+} from './services/background'
+import type { BackgroundTaskStatus } from './services/background'
+
+// V3: Loop Engine & Boulder State
+import {
+  createLoop, getLoop, getAllLoops, getLoopsByStatus,
+  startLoop, pauseLoop, resumeLoop, cancelLoop,
+  onLoopEvent, saveBoulder, getBoulder, getBoulderByProject,
+  updateBoulderCheckpoint, addModifiedFile, updateTodoSnapshot,
+  restoreBoulder, deleteBoulder, getAllBoulders,
+  createRalphConfig, createUltraworkConfig, createBoulderConfig
+} from './services/loops'
+import type { LoopStep } from './services/loops'
+
+// V3: Agent Capabilities
+import {
+  registerDefaultCapabilities, getCapability, getAllCapabilities,
+  canDelegate, isReadOnly, isBackgroundCapable, getToolWhitelist,
+  createDelegationRequest, recordDelegation, getDelegationHistory
+} from './services/agents/agent-capabilities'
+
 let mainWindow: BrowserWindow | null = null
+
+app.setName('Cortex')
 
 function createWindow(): void {
   const iconPath = join(__dirname, '../../build/icon.png')
   mainWindow = new BrowserWindow({
+    title: 'Cortex',
     width: 1200,
     height: 800,
     minWidth: 800,
@@ -120,8 +163,23 @@ app.whenReady().then(() => {
     console.error('[Main] Database init failed:', err)
   }
 
-  // Pre-fetch available LLM models
-  fetchAvailableModels().catch((err) => console.error('[LLM] Initial model fetch failed:', err))
+  // Pre-fetch available LLM models AND probe their real-time availability
+  // Uses refreshModelsWithCheck() instead of fetchAvailableModels() to ensure
+  // status dots (ready/quota_exhausted/unavailable) are accurate from startup
+  refreshModelsWithCheck().catch((err) => console.error('[LLM] Initial model probe failed:', err))
+
+  preloadEmbeddingModel()
+
+  registerDefaultHooks()
+  registerDefaultCapabilities()
+
+  onTaskEvent((event) => {
+    mainWindow?.webContents.send('background:taskEvent', { type: event.type, task: event.task })
+  })
+
+  onLoopEvent((event) => {
+    mainWindow?.webContents.send('loop:event', { type: event.type, state: ('state' in event) ? (event as any).state : undefined })
+  })
 
   // =====================
   // IPC: System dialogs
@@ -366,7 +424,7 @@ app.whenReady().then(() => {
   // =====================
   const activeAbortControllers = new Map<string, AbortController>()
 
-  ipcMain.handle(
+   ipcMain.handle(
     'chat:send',
     async (
       _event,
@@ -375,11 +433,15 @@ app.whenReady().then(() => {
       query: string,
       mode: ChatMode,
       history: ChatMessage[],
-      attachments?: Array<{ id: string; name: string; path: string; size: number; mimeType: string; isImage: boolean; base64?: string; textContent?: string }>
+      attachments?: Array<{ id: string; name: string; path: string; size: number; mimeType: string; isImage: boolean; base64?: string; textContent?: string }>,
+      agentMode?: string
     ) => {
       const emitThinking = (step: string, status: string, label: string, detail?: string, durationMs?: number) => {
         mainWindow?.webContents.send('chat:thinking', { conversationId, step, status, label, detail, durationMs })
       }
+
+      let routedModel = ''
+      let routingDecision: ReturnType<typeof resolveCategory> | undefined
 
       try {
         // 0. Sanitize prompt for injection
@@ -404,6 +466,64 @@ app.whenReady().then(() => {
         } catch (memErr) {
           console.warn('[Chat] Memory load failed (non-fatal):', memErr)
           emitThinking('memory', 'error', 'Đọc bộ nhớ', 'Lỗi', Date.now() - stepStart)
+        }
+
+        // 0c. Inject agent mode context (Sisyphus, Hephaestus, etc.)
+        const AGENT_MODE_CONFIGS: Record<string, { systemPrompt: string; modeDirectives: string }> = {
+          sisyphus: {
+            systemPrompt: 'You are Sisyphus — the Ultraworker. A relentless, high-output execution agent. You take complex tasks and break them into atomic steps, then execute each step with maximum precision and speed. You never stop until the task is fully complete.',
+            modeDirectives: `[analyze-mode]\nANALYSIS MODE. Gather context before diving deep:\nCONTEXT GATHERING (parallel):\n- 1-2 explore agents (codebase patterns, implementations)\n- 1-2 librarian agents (if external library involved)\n- Direct tools: Grep, AST-grep, LSP for targeted searches\nIF COMPLEX - DO NOT STRUGGLE ALONE. Consult specialists:\n- Oracle: Conventional problems (architecture, debugging, complex logic)\n- Artistry: Non-conventional problems (different approach needed)\nSYNTHESIZE findings before proceeding.\n\n[search-mode]\nMAXIMIZE SEARCH EFFORT. Launch multiple background agents IN PARALLEL:\n- explore agents (codebase patterns, file structures, ast-grep)\n- librarian agents (remote repos, official docs, GitHub examples)\nPlus direct tools: Grep, ripgrep, ast-grep\nNEVER stop at first result - be exhaustive.\n\n[todo-continuation]\nWhen tasks remain incomplete:\n- Track progress via structured todo list\n- Continue working on pending tasks without asking\n- Mark each task complete when finished\n- Do not stop until all tasks are done`
+          },
+          hephaestus: {
+            systemPrompt: 'You are Hephaestus — the Deep Agent. A thorough, research-first problem solver. You investigate problems deeply before acting, examining all angles and dependencies. You prefer understanding root causes over quick fixes.',
+            modeDirectives: `[deep-research-mode]\nDEEP RESEARCH MODE. Investigate thoroughly before any action:\n- Read ALL relevant source files before proposing changes\n- Trace call chains and dependency graphs\n- Understand the full context of the problem space\n- Document findings before implementing\n\n[root-cause-analysis]\nFor every problem:\n1. Reproduce and understand the symptom\n2. Trace backwards through the code to find the actual root cause\n3. Verify your hypothesis before fixing\n4. Consider side effects of any changes`
+          },
+          prometheus: {
+            systemPrompt: 'You are Prometheus — the Strategic Planner. You analyze features and ideas comprehensively, producing detailed execution plans with architecture decisions, task breakdowns, risk assessments, and dependency graphs. You plan before anyone builds.',
+            modeDirectives: `[planning-mode]\nSTRATEGIC PLANNING MODE:\n- Analyze requirements and constraints thoroughly\n- Identify all affected systems and dependencies\n- Create detailed task breakdown with effort estimates\n- Assess risks and propose mitigations\n- Define clear acceptance criteria for each deliverable\n\n[architecture-mode]\nFor architecture decisions:\n1. Evaluate multiple approaches with pros/cons\n2. Consider scalability, maintainability, and team capacity\n3. Document decision rationale\n4. Create dependency graph and implementation order`
+          },
+          atlas: {
+            systemPrompt: 'You are Atlas — the Heavy Lifter. A powerful execution agent for large-scale tasks involving multiple files, systems, or complex refactoring. You handle the heaviest workloads with systematic, methodical precision.',
+            modeDirectives: `[parallel-execution-mode]\nPARALLEL EXECUTION MODE for large-scale operations:\n- Identify all files and systems that need changes\n- Group changes into independent batches that can run in parallel\n- Execute systematically: batch by batch, verify after each\n- Track progress across all affected areas\n\n[bulk-operation-mode]\nFor operations spanning many files:\n1. Scan and catalog all affected files first\n2. Create a change plan before touching any file\n3. Apply changes in order of dependency\n4. Verify each change doesn't break others\n5. Run full test suite after all changes`
+          },
+        }
+
+        let agentContext = ''
+        if (agentMode && AGENT_MODE_CONFIGS[agentMode]) {
+          const agentConfig = AGENT_MODE_CONFIGS[agentMode]
+          agentContext = agentConfig.systemPrompt + '\n\n' + agentConfig.modeDirectives
+          emitThinking('agent_mode', 'done', 'Agent Mode', agentMode.charAt(0).toUpperCase() + agentMode.slice(1))
+        }
+
+        // V3: Category Routing — resolve category config for this query
+        stepStart = Date.now()
+        emitThinking('routing', 'running', 'Chọn model')
+        const slashCmd = query.match(/^\/(\S+)/)?.[1]
+        routingDecision = resolveCategory({
+          prompt: query,
+          slashCommand: slashCmd
+        })
+        const userModel = getActiveModel()
+        const useRoutedModel = routingDecision.confidence >= 0.9
+        routedModel = useRoutedModel ? routingDecision.model : userModel
+        console.log(`[Chat] V3 Routing: ${routingDecision.category} → ${routedModel} (confidence: ${routingDecision.confidence.toFixed(2)}, reason: ${routingDecision.reason}${useRoutedModel ? '' : ', keeping user model'})`)
+        emitThinking('routing', 'done', 'Chọn model',
+          `${routingDecision.category} → ${routedModel}`,
+          Date.now() - stepStart)
+
+        // V3: Run before:chat hooks (cost-guard, cache-check, context-window-monitor, etc.)
+        const beforeHooks = await runHooks('before:chat', {
+          projectId,
+          conversationId,
+          query,
+          model: routedModel,
+          metadata: { category: routingDecision.category, confidence: routingDecision.confidence }
+        })
+        if (beforeHooks.aborted) {
+          const abortMsg = beforeHooks.abortMessage || 'Request blocked by hook'
+          console.log(`[Chat] V3 Hook aborted: ${abortMsg}`)
+          mainWindow?.webContents.send('chat:stream', { conversationId, content: `⚠️ ${abortMsg}`, done: true })
+          return { success: false, error: abortMsg }
         }
 
         const COMMAND_SKILL_MAP: Record<string, string> = {
@@ -754,7 +874,7 @@ app.whenReady().then(() => {
           history,
           projectStats,
           [externalContext, webContext, attachmentContext].filter(Boolean).join('\n\n---\n\n') || null,
-          memoryContext || null
+          [agentContext, memoryContext].filter(Boolean).join('\n\n---\n\n') || null
         )
         if (compressionStats) {
           console.log(`[Chat] Context compression: ${compressionStats.savingsPercent}% token savings`)
@@ -805,15 +925,17 @@ app.whenReady().then(() => {
           console.warn('[Chat] Cache check failed (non-fatal):', cacheErr)
         }
 
-        // 4. Collect MCP tools for function calling
+        // 4. Collect built-in + MCP tools for function calling
+        const builtinTools = getBuiltinToolDefinitions(projectId)
         let mcpToolDefs: Awaited<ReturnType<typeof getToolDefinitions>> = []
         try {
           mcpToolDefs = await getToolDefinitions()
-          if (mcpToolDefs.length > 0) {
-            console.log(`[Chat] MCP tools available: ${mcpToolDefs.length} (${mcpToolDefs.map(t => t.function.name).join(', ')})`)
-          }
         } catch (toolErr) {
           console.warn('[Chat] Failed to collect MCP tools (non-fatal):', toolErr)
+        }
+        const allTools = [...builtinTools, ...mcpToolDefs]
+        if (allTools.length > 0) {
+          console.log(`[Chat] Tools available: ${allTools.length} (${allTools.map(t => t.function.name).join(', ')})`)
         }
 
         // 5. Stream response with tool call loop (OpenCode pattern)
@@ -828,7 +950,8 @@ app.whenReady().then(() => {
           conversationId,
           mainWindow,
           abortController.signal,
-          mcpToolDefs.length > 0 ? mcpToolDefs : undefined
+          allTools.length > 0 ? allTools : undefined,
+          routedModel || undefined
         )
 
         while (
@@ -838,7 +961,7 @@ app.whenReady().then(() => {
         ) {
           toolIteration++
           console.log(`[Chat] Tool call loop iteration ${toolIteration}: ${streamResult.toolCalls.map(tc => tc.function.name).join(', ')}`)
-          emitThinking('tool_call', 'running', 'Gọi MCP tools', `${streamResult.toolCalls.map(tc => tc.function.name).join(', ')} (lần ${toolIteration})`)
+          emitThinking('tool_call', 'running', 'Gọi tools', `${streamResult.toolCalls.map(tc => tc.function.name).join(', ')} (lần ${toolIteration})`)
 
           const assistantMsg: ChatMessage = {
             role: 'assistant',
@@ -848,7 +971,9 @@ app.whenReady().then(() => {
           messages.push(assistantMsg)
 
           for (const toolCall of streamResult.toolCalls) {
-            const toolResult = await executeMCPTool(toolCall.function.name, toolCall.function.arguments)
+            const toolResult = toolCall.function.name.startsWith('cortex_')
+              ? await executeBuiltinTool(toolCall.function.name, toolCall.function.arguments, projectId)
+              : await executeMCPTool(toolCall.function.name, toolCall.function.arguments)
             console.log(`[Chat] Tool ${toolCall.function.name}: ${toolResult.isError ? 'ERROR' : 'OK'} (${toolResult.content.length} chars)`)
 
             messages.push({
@@ -858,14 +983,15 @@ app.whenReady().then(() => {
             })
           }
 
-          emitThinking('tool_call', 'done', 'Gọi MCP tools', `${streamResult.toolCalls.length} tools xong`)
+          emitThinking('tool_call', 'done', 'Gọi tools', `${streamResult.toolCalls.length} tools xong`)
 
           streamResult = await streamChatCompletion(
             messages,
             conversationId,
             mainWindow,
             abortController.signal,
-            mcpToolDefs.length > 0 ? mcpToolDefs : undefined
+            allTools.length > 0 ? allTools : undefined,
+            routedModel || undefined
           )
         }
 
@@ -918,11 +1044,28 @@ app.whenReady().then(() => {
               model: streamResult.model,
               inputTokens,
               outputTokens,
-              cost: estimateCost(streamResult.model, inputTokens, outputTokens)
+              cost: estimateCost(streamResult.model, inputTokens, outputTokens),
+              compressedOriginal: compressionStats?.originalTokens || 0,
+              compressedFinal: compressionStats?.compressedTokens || 0
             })
           } catch {
             // Non-fatal
           }
+        }
+
+        // V3: Run after:chat hooks (response-validator, audit-logger, memory-saver, thinking-step-emitter)
+        try {
+          await runHooks('after:chat', {
+            projectId,
+            conversationId,
+            query,
+            response: response || '',
+            model: streamResult.model,
+            tokens: streamResult.usage ? { input: streamResult.usage.promptTokens, output: streamResult.usage.completionTokens } : undefined,
+            metadata: { category: routingDecision?.category }
+          })
+        } catch (hookErr) {
+          console.warn('[Chat] after:chat hooks failed (non-fatal):', hookErr)
         }
 
         // 5d. Record behavioral event for self-learning
@@ -946,14 +1089,23 @@ app.whenReady().then(() => {
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err)
 
-        // Persist error to empty assistant placeholder so it shows on reload
+        try {
+          await runHooks('on:error', {
+            projectId,
+            conversationId,
+            query,
+            error: err instanceof Error ? err : new Error(String(err)),
+            metadata: { category: routingDecision?.category }
+          })
+        } catch { /* non-fatal */ }
+
         try {
           const db = getDb()
           const emptyAssistant = db.prepare(
             "SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' AND content = '' ORDER BY created_at DESC LIMIT 1"
           ).get(conversationId) as { id: string } | undefined
           if (emptyAssistant) {
-            const errorContent = `\u26a0\ufe0f L\u1ed7i: ${errorMsg}`
+            const errorContent = `⚠️ Lỗi: ${errorMsg}`
             messageQueries.updateContent(db).run(errorContent, emptyAssistant.id)
           }
         } catch {
@@ -988,11 +1140,14 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('llm:getAvailableModels', async () => {
-    // If cache is empty (race condition on startup), fetch first
-    const models = getAvailableModels()
+    let models = getAvailableModels()
     if (models.length === 0) {
       await fetchAvailableModels()
-      return getAvailableModels()
+      models = getAvailableModels()
+    }
+    const nonReady = models.filter(m => m.status !== 'ready')
+    if (nonReady.length > 0) {
+      console.log(`[LLM] IPC getAvailableModels → ${models.length} models, non-ready: ${nonReady.map(m => `${m.id}(${m.status})`).join(', ')}`)
     }
     return models
   })
@@ -1002,6 +1157,10 @@ app.whenReady().then(() => {
     return models.map((m) => ({ id: m.id, tier: m.tier }))
   })
 
+  ipcMain.handle('llm:refreshModelsWithCheck', async () => {
+    return await refreshModelsWithCheck()
+  })
+
   ipcMain.handle('llm:setModel', (_event, modelId: string) => {
     return setActiveModel(modelId)
   })
@@ -1009,7 +1168,7 @@ app.whenReady().then(() => {
   ipcMain.handle('llm:getAutoRotation', () => getAutoRotation())
   ipcMain.handle('llm:setAutoRotation', (_event, enabled: boolean) => {
     setAutoRotation(enabled)
-    if (enabled) clearAuthFailedModels() // Reset failed list when re-enabling
+    if (enabled) clearAuthFailedModels()
     return true
   })
 
@@ -1172,13 +1331,27 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:getProxyConfig', () => getProxyConfig())
   ipcMain.handle('settings:setProxyConfig', (_event, url: string, key: string) => {
     setProxyConfig(url, key)
-    clearAuthFailedModels() // Reset auth failures when proxy config changes
+    clearAuthFailedModels()
     return true
   })
   ipcMain.handle('settings:getLLMConfig', () => getLLMConfig())
   ipcMain.handle('settings:setLLMConfig', (_event, maxTokens: number, contextMessages: number) => {
     setLLMConfig(maxTokens, contextMessages)
     return true
+  })
+  ipcMain.handle('settings:getEmbeddingConfig', () => ({
+    mode: 'local',
+    model: 'Xenova/all-MiniLM-L6-v2',
+    dimensions: EMBEDDING_DIMENSIONS
+  }))
+  ipcMain.handle('settings:testEmbeddingConnection', async () => {
+    try {
+      const start = Date.now()
+      const embedding = await embedQuery('test embedding')
+      return { success: true, dimensions: embedding.length, latencyMs: Date.now() - start }
+    } catch (err) {
+      return { success: false, error: String(err instanceof Error ? err.message : err) }
+    }
   })
   ipcMain.handle('settings:getGitConfig', () => getGitConfig())
   ipcMain.handle('settings:setGitConfig', (_event, cloneDepth: number) => {
@@ -1285,6 +1458,7 @@ app.whenReady().then(() => {
     try {
       const feedback = getFeedbackStats(projectId)
       const weightCount = getLearnedWeightCount(projectId)
+      const compression = getCompressionStats(projectId)
       return {
         totalFeedback: feedback.totalFeedback,
         totalTrainingPairs: feedback.totalTrainingPairs,
@@ -1293,7 +1467,7 @@ app.whenReady().then(() => {
           ? feedback.positiveCount / feedback.totalFeedback
           : 0,
         lastTrainedAt: null,
-        compressionSavings: { tokensOriginal: 0, tokensCompressed: 0, savingsPercent: 0 }
+        compressionSavings: compression
       }
     } catch (err) {
       console.error('[Learning] Failed to get stats:', err)
@@ -1698,6 +1872,171 @@ app.whenReady().then(() => {
     return await checkMCPServerHealth(id)
   })
 
+  // =====================
+  // V3: Hook System IPC
+  // =====================
+  ipcMain.handle('hooks:list', () => {
+    return listHooks().map(h => ({
+      id: h.id, name: h.name, description: h.description,
+      trigger: h.trigger, priority: h.priority, enabled: h.enabled,
+      stats: h.stats
+    }))
+  })
+
+  ipcMain.handle('hooks:enable', (_event, hookId: string) => {
+    return enableHook(hookId)
+  })
+
+  ipcMain.handle('hooks:disable', (_event, hookId: string) => {
+    return disableHook(hookId)
+  })
+
+  ipcMain.handle('hooks:run', async (_event, trigger: HookTrigger, context: HookContext) => {
+    return await runHooks(trigger, context)
+  })
+
+  // =====================
+  // V3: Category Routing IPC
+  // =====================
+  ipcMain.handle('routing:resolve', (_event, input: { prompt?: string; category?: TaskCategory; slashCommand?: string }) => {
+    return resolveCategory(input)
+  })
+
+  ipcMain.handle('routing:routeModel', (_event, category: TaskCategory, availableModels: string[]) => {
+    const decision = resolveCategory({ category })
+    return routeToModel(decision, availableModels)
+  })
+
+  // =====================
+  // V3: Background Task Manager IPC
+  // =====================
+  ipcMain.handle('background:launch', (_event, options: {
+    description: string; category?: string; agentType?: string;
+    provider?: string; priority?: number; metadata?: Record<string, unknown>
+  }) => {
+    const taskId = launchTask({
+      ...options,
+      execute: async () => {
+        return { status: 'delegated', description: options.description }
+      }
+    })
+    return taskId
+  })
+
+  ipcMain.handle('background:cancel', (_event, taskId: string) => {
+    return cancelTask(taskId)
+  })
+
+  ipcMain.handle('background:get', (_event, taskId: string) => {
+    return getTask(taskId) ?? null
+  })
+
+  ipcMain.handle('background:getAll', () => {
+    return getAllTasks()
+  })
+
+  ipcMain.handle('background:getByStatus', (_event, status: BackgroundTaskStatus) => {
+    return getTasksByStatus(status)
+  })
+
+  ipcMain.handle('background:cleanup', (_event, olderThanMs?: number) => {
+    return cleanupCompleted(olderThanMs)
+  })
+
+  ipcMain.handle('background:detectStale', () => {
+    return detectStaleTasks()
+  })
+
+  ipcMain.handle('background:concurrency:get', () => {
+    return getConcurrencyConfig()
+  })
+
+  ipcMain.handle('background:concurrency:set', (_event, config: Record<string, unknown>) => {
+    configureConcurrency(config as Parameters<typeof configureConcurrency>[0])
+    return getConcurrencyConfig()
+  })
+
+  // =====================
+  // V3: Loop Engine IPC
+  // =====================
+  ipcMain.handle('loop:create', (_event, type: 'ralph' | 'ultrawork' | 'boulder', metadata?: Record<string, unknown>) => {
+    const configMap = { ralph: createRalphConfig, ultrawork: createUltraworkConfig, boulder: createBoulderConfig }
+    const config = configMap[type]()
+    return createLoop(config, metadata)
+  })
+
+  ipcMain.handle('loop:get', (_event, loopId: string) => {
+    return getLoop(loopId) ?? null
+  })
+
+  ipcMain.handle('loop:getAll', () => {
+    return getAllLoops()
+  })
+
+  ipcMain.handle('loop:getByStatus', (_event, status: string) => {
+    return getLoopsByStatus(status as Parameters<typeof getLoopsByStatus>[0])
+  })
+
+  ipcMain.handle('loop:pause', (_event, loopId: string) => {
+    return pauseLoop(loopId)
+  })
+
+  ipcMain.handle('loop:resume', (_event, loopId: string) => {
+    return resumeLoop(loopId)
+  })
+
+  ipcMain.handle('loop:cancel', (_event, loopId: string) => {
+    return cancelLoop(loopId)
+  })
+
+  // =====================
+  // V3: Boulder State IPC
+  // =====================
+  ipcMain.handle('boulder:get', (_event, loopId: string) => {
+    return getBoulder(loopId) ?? null
+  })
+
+  ipcMain.handle('boulder:getByProject', (_event, projectId: string) => {
+    return getBoulderByProject(projectId)
+  })
+
+  ipcMain.handle('boulder:getAll', () => {
+    return getAllBoulders()
+  })
+
+  ipcMain.handle('boulder:restore', (_event, loopId: string) => {
+    return restoreBoulder(loopId) ?? null
+  })
+
+  ipcMain.handle('boulder:delete', (_event, loopId: string) => {
+    return deleteBoulder(loopId)
+  })
+
+  ipcMain.handle('boulder:updateCheckpoint', (_event, loopId: string, checkpoint: Record<string, unknown>) => {
+    return updateBoulderCheckpoint(loopId, checkpoint)
+  })
+
+  // =====================
+  // V3: Agent Capabilities IPC
+  // =====================
+  ipcMain.handle('capabilities:getAll', () => {
+    return getAllCapabilities()
+  })
+
+  ipcMain.handle('capabilities:get', (_event, role: string) => {
+    return getCapability(role as Parameters<typeof getCapability>[0]) ?? null
+  })
+
+  ipcMain.handle('capabilities:canDelegate', (_event, from: string, to: string) => {
+    return canDelegate(
+      from as Parameters<typeof canDelegate>[0],
+      to as Parameters<typeof canDelegate>[1]
+    )
+  })
+
+  ipcMain.handle('capabilities:delegationHistory', (_event, fromAgent?: string) => {
+    return getDelegationHistory(fromAgent as Parameters<typeof getDelegationHistory>[0])
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

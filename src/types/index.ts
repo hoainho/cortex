@@ -1,5 +1,7 @@
 export type ResponseMode = 'pm' | 'engineering'
 
+export type ModelStatus = 'ready' | 'quota_exhausted' | 'unavailable'
+
 export type ImportSourceType = 'local' | 'github'
 
 export type BrainStatus = 'idle' | 'indexing' | 'ready' | 'error'
@@ -74,7 +76,7 @@ export interface SyncResult {
 
 export type FeedbackSignalType = 'thumbs_up' | 'thumbs_down' | 'copy' | 'follow_up_quick' | 'follow_up_slow' | 'no_follow_up'
 
-export type ThinkingStepId = 'sanitize' | 'rag' | 'external_context' | 'web_search' | 'build_prompt' | 'streaming'
+export type ThinkingStepId = 'sanitize' | 'memory' | 'rag' | 'external_context' | 'web_search' | 'build_prompt' | 'cache' | 'tool_call' | 'agent_init' | 'agent_mode' | 'orchestrate' | 'streaming' | 'routing'
 
 export type ThinkingStepStatus = 'running' | 'done' | 'skipped' | 'error'
 
@@ -101,6 +103,216 @@ export interface ContextCompressionStats {
   compressedTokens: number
   savingsPercent: number
   chunksSummary: Array<{ chunkType: string; original: number; compressed: number }>
+}
+
+// =====================
+// V3: Hook System Types
+// =====================
+export type HookTrigger =
+  | 'before:chat'
+  | 'after:chat'
+  | 'on:error'
+  | 'on:stream'
+  | 'before:delegation'
+  | 'after:delegation'
+  | 'on:model:switch'
+  | 'on:context:overflow'
+  | 'on:tool:call'
+  | 'on:session:start'
+  | 'on:session:end'
+
+export type HookPriority = 'critical' | 'high' | 'normal' | 'low'
+
+export interface HookInfo {
+  id: string
+  name: string
+  description: string
+  trigger: HookTrigger | HookTrigger[]
+  priority: HookPriority
+  enabled: boolean
+  stats: {
+    totalExecutions: number
+    successCount: number
+    errorCount: number
+    avgLatencyMs: number
+    lastExecutedAt: number | null
+  }
+}
+
+export interface HookRunResult {
+  modified: boolean
+  aborted: boolean
+  results: Array<{
+    hookId: string
+    success: boolean
+    modified?: boolean
+    abort?: boolean
+    error?: string
+    durationMs: number
+  }>
+}
+
+// =====================
+// V3: Category Routing Types
+// =====================
+export type TaskCategory =
+  | 'deep'
+  | 'visual-engineering'
+  | 'ultrabrain'
+  | 'artistry'
+  | 'quick'
+  | 'unspecified-low'
+  | 'unspecified-high'
+  | 'writing'
+
+export interface RoutingDecision {
+  category: TaskCategory
+  model: string
+  config: {
+    category: TaskCategory
+    description: string
+    defaultModel: string
+    fallbackChain: string[]
+    temperature: number
+    maxTokens: number
+    thinkingBudget?: number
+    reasoningEffort?: 'low' | 'medium' | 'high'
+    toolWhitelist?: string[]
+    promptAppend?: string
+  }
+  confidence: number
+  reason: string
+}
+
+// =====================
+// V3: Background Task Types
+// =====================
+export type BackgroundTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'stale'
+
+export interface BackgroundTask {
+  id: string
+  description: string
+  status: BackgroundTaskStatus
+  category?: string
+  agentType?: string
+  createdAt: number
+  startedAt: number | null
+  completedAt: number | null
+  result?: unknown
+  error?: string
+  progress?: number
+  metadata?: Record<string, unknown>
+}
+
+export interface ConcurrencyConfig {
+  maxGlobal: number
+  maxPerProvider: Record<string, number>
+  maxPerCategory: Record<string, number>
+  queueTimeout: number
+  taskTimeout: number
+}
+
+export interface BackgroundTaskEvent {
+  type: string
+  task: BackgroundTask
+  progress?: number
+}
+
+// =====================
+// V3: Loop Engine Types
+// =====================
+export type LoopType = 'ralph' | 'ultrawork' | 'boulder'
+
+export type LoopStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+
+export type LoopStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+
+export interface LoopStep {
+  id: string
+  description: string
+  status: LoopStepStatus
+  result?: string
+  error?: string
+  startedAt: number | null
+  completedAt: number | null
+  iteration: number
+}
+
+export interface LoopState {
+  id: string
+  type: LoopType
+  status: LoopStatus
+  currentIteration: number
+  steps: LoopStep[]
+  startedAt: number | null
+  completedAt: number | null
+  lastActivityAt: number
+  metadata: Record<string, unknown>
+}
+
+export interface LoopEvent {
+  type: string
+  state: LoopState
+  iteration?: number
+  step?: LoopStep
+  error?: string
+}
+
+// =====================
+// V3: Boulder State Types
+// =====================
+export interface BoulderState {
+  loopId: string
+  projectId: string
+  sessionId: string
+  checkpoint: Record<string, unknown>
+  todoSnapshot: Array<{ content: string; status: string; priority: string }>
+  filesModified: string[]
+  createdAt: number
+  updatedAt: number
+}
+
+// =====================
+// V3: Agent Capability Types
+// =====================
+export type AgentRole =
+  | 'orchestrator'
+  | 'performance'
+  | 'security'
+  | 'review'
+  | 'writer'
+  | 'formatter'
+  | 'feedback'
+  | 'implementation'
+  | 'knowledge-crystallizer'
+  | 'sisyphus'
+  | 'hephaestus'
+  | 'prometheus'
+  | 'atlas'
+  | 'oracle'
+  | 'explore'
+  | 'librarian'
+
+export interface AgentCapability {
+  role: AgentRole
+  toolWhitelist?: string[]
+  canDelegate: boolean
+  delegateTo?: AgentRole[]
+  maxConcurrentDelegations?: number
+  readOnly: boolean
+  backgroundCapable: boolean
+}
+
+export type DelegationStatus = 'pending' | 'accepted' | 'running' | 'completed' | 'failed' | 'rejected'
+
+export interface DelegationResult {
+  requestId: string
+  status: DelegationStatus
+  fromAgent: AgentRole
+  toAgent: AgentRole
+  result?: string
+  error?: string
+  durationMs: number
 }
 
 declare global {
@@ -147,7 +359,8 @@ declare global {
         query: string,
         mode: string,
         history: Array<{ role: string; content: string }>,
-        attachments?: ChatAttachment[]
+        attachments?: ChatAttachment[],
+        agentMode?: string
       ) => Promise<{ success: boolean; content?: string; error?: string; contextChunks?: any[] }>
       abortChat: (conversationId: string) => Promise<boolean>
 
@@ -163,8 +376,9 @@ declare global {
 
       // LLM Models
       getActiveModel: () => Promise<string>
-      getAvailableModels: () => Promise<Array<{ id: string; tier: number; active: boolean }>>
+      getAvailableModels: () => Promise<Array<{ id: string; tier: number; active: boolean; status: ModelStatus }>>
       refreshModels: () => Promise<Array<{ id: string; tier: number }>>
+      refreshModelsWithCheck: () => Promise<Array<{ id: string; tier: number; active: boolean; status: ModelStatus }>>
       setModel: (modelId: string) => Promise<{ success: boolean; model?: string; error?: string }>
       getAutoRotation: () => Promise<boolean>
       setAutoRotation: (enabled: boolean) => Promise<boolean>
@@ -202,6 +416,8 @@ declare global {
       setProxyConfig: (url: string, key: string) => Promise<boolean>
       getLLMConfig: () => Promise<{ maxTokens: number; contextMessages: number }>
       setLLMConfig: (maxTokens: number, contextMessages: number) => Promise<boolean>
+      getEmbeddingConfig: () => Promise<{ mode: string; model: string; dimensions: number }>
+      testEmbeddingConnection: () => Promise<{ success: boolean; dimensions?: number; latencyMs?: number; error?: string }>
       getGitConfig: () => Promise<{ cloneDepth: number }>
       setGitConfig: (cloneDepth: number) => Promise<boolean>
       testProxyConnection: (url: string, key: string) => Promise<{ success: boolean; error?: string; latencyMs?: number }>
@@ -296,6 +512,57 @@ declare global {
       onFileChanged: (callback: (data: { repoId: string }) => void) => () => void
       onModelRotated: (callback: (data: { fromModel: string; reason: string; type: string }) => void) => () => void
       onAgentStep?: (callback: (data: { step: string; type: string; content: string }) => void) => () => void
+
+      // V3: Hook System
+      hooksList: () => Promise<HookInfo[]>
+      hooksEnable: (hookId: string) => Promise<boolean>
+      hooksDisable: (hookId: string) => Promise<boolean>
+      hooksRun: (trigger: string, context: Record<string, unknown>) => Promise<HookRunResult>
+
+      // V3: Category Routing
+      routingResolve: (input: { prompt?: string; category?: string; slashCommand?: string }) => Promise<RoutingDecision>
+      routingRouteModel: (category: string, availableModels: string[]) => Promise<string>
+
+      // V3: Background Tasks
+      backgroundLaunch: (options: {
+        description: string; category?: string; agentType?: string
+        provider?: string; priority?: number; metadata?: Record<string, unknown>
+      }) => Promise<string>
+      backgroundCancel: (taskId: string) => Promise<boolean>
+      backgroundGet: (taskId: string) => Promise<BackgroundTask | null>
+      backgroundGetAll: () => Promise<BackgroundTask[]>
+      backgroundGetByStatus: (status: string) => Promise<BackgroundTask[]>
+      backgroundCleanup: (olderThanMs?: number) => Promise<number>
+      backgroundDetectStale: () => Promise<BackgroundTask[]>
+      backgroundConcurrencyGet: () => Promise<ConcurrencyConfig>
+      backgroundConcurrencySet: (config: Record<string, unknown>) => Promise<ConcurrencyConfig>
+
+      onBackgroundTaskEvent: (callback: (data: BackgroundTaskEvent) => void) => () => void
+
+      // V3: Loop Engine
+      loopCreate: (type: LoopType, metadata?: Record<string, unknown>) => Promise<LoopState>
+      loopGet: (loopId: string) => Promise<LoopState | null>
+      loopGetAll: () => Promise<LoopState[]>
+      loopGetByStatus: (status: string) => Promise<LoopState[]>
+      loopPause: (loopId: string) => Promise<LoopState>
+      loopResume: (loopId: string) => Promise<LoopState>
+      loopCancel: (loopId: string) => Promise<LoopState>
+
+      onLoopEvent: (callback: (data: LoopEvent) => void) => () => void
+
+      // V3: Boulder State
+      boulderGet: (loopId: string) => Promise<BoulderState | null>
+      boulderGetByProject: (projectId: string) => Promise<BoulderState[]>
+      boulderGetAll: () => Promise<BoulderState[]>
+      boulderRestore: (loopId: string) => Promise<BoulderState | null>
+      boulderDelete: (loopId: string) => Promise<boolean>
+      boulderUpdateCheckpoint: (loopId: string, checkpoint: Record<string, unknown>) => Promise<BoulderState>
+
+      // V3: Agent Capabilities
+      capabilitiesGetAll: () => Promise<Record<string, AgentCapability>>
+      capabilitiesGet: (role: string) => Promise<AgentCapability | null>
+      capabilitiesCanDelegate: (from: string, to: string) => Promise<boolean>
+      capabilitiesDelegationHistory: (fromAgent?: string) => Promise<DelegationResult[]>
     }
   }
 }

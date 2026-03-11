@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   X,
   Server,
+  Brain,
   Zap,
   GitBranch,
   CheckCircle,
@@ -35,6 +36,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [testError, setTestError] = useState('')
   const [testLatency, setTestLatency] = useState(0)
   const [saving, setSaving] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [saveError, setSaveError] = useState('')
 
   // LLM Config
   const [maxTokens, setMaxTokens] = useState(8192)
@@ -51,6 +54,13 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [showGithubToken, setShowGithubToken] = useState(false)
 
   const [autoRotation, setAutoRotationState] = useState(true)
+
+  const [embeddingModelName, setEmbeddingModelName] = useState('')
+  const [embeddingDimensions, setEmbeddingDimensions] = useState(0)
+  const [embeddingTestStatus, setEmbeddingTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
+  const [embeddingTestError, setEmbeddingTestError] = useState('')
+  const [embeddingTestDims, setEmbeddingTestDims] = useState(0)
+  const [embeddingTestLatency, setEmbeddingTestLatency] = useState(0)
   // Load settings
   useEffect(() => {
     if (!open) return
@@ -66,6 +76,10 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
 
         const git = await window.electronAPI.getGitConfig()
         setCloneDepth(git.cloneDepth)
+
+        const embedding = await window.electronAPI.getEmbeddingConfig()
+        setEmbeddingModelName(embedding.model)
+        setEmbeddingDimensions(embedding.dimensions)
       } catch (err) {
         console.error('Failed to load settings:', err)
       }
@@ -101,8 +115,29 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     }
   }, [proxyUrl, proxyKey])
 
+  const handleTestEmbedding = useCallback(async () => {
+    setEmbeddingTestStatus('testing')
+    setEmbeddingTestError('')
+    try {
+      const result = await window.electronAPI.testEmbeddingConnection()
+      if (result.success) {
+        setEmbeddingTestStatus('success')
+        setEmbeddingTestDims(result.dimensions || 0)
+        setEmbeddingTestLatency(result.latencyMs || 0)
+      } else {
+        setEmbeddingTestStatus('error')
+        setEmbeddingTestError(result.error || 'Kiểm tra thất bại')
+      }
+    } catch {
+      setEmbeddingTestStatus('error')
+      setEmbeddingTestError('Lỗi kiểm tra model')
+    }
+  }, [])
+
   const handleSave = useCallback(async () => {
     setSaving(true)
+    setSaveStatus('idle')
+    setSaveError('')
     try {
       await window.electronAPI.setProxyConfig(proxyUrl, proxyKey)
       await window.electronAPI.setLLMConfig(maxTokens, contextMessages)
@@ -113,8 +148,13 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         setGithubConfigured(true)
         setGithubToken('')
       }
+      setSaveStatus('success')
+      setTimeout(() => setSaveStatus('idle'), 3000)
     } catch (err) {
       console.error('Failed to save settings:', err)
+      setSaveStatus('error')
+      setSaveError(err instanceof Error ? err.message : 'Lưu thất bại')
+      setTimeout(() => setSaveStatus('idle'), 5000)
     } finally {
       setSaving(false)
     }
@@ -240,6 +280,50 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 {testStatus === 'error' && (
                   <span className="flex items-center gap-1 text-[12px] text-[var(--status-error-text)]">
                     <AlertCircle size={14} /> {testError}
+                  </span>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Brain size={16} className="text-[var(--accent-primary)]" />
+              <h3 className="text-[13px] font-semibold text-[var(--text-primary)] uppercase tracking-wider">
+                Embedding
+              </h3>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] font-medium">
+                Cục bộ
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between py-1.5">
+                <span className="text-[12px] text-[var(--text-secondary)]">Mô hình</span>
+                <span className="text-[12px] text-[var(--text-primary)] font-mono">{embeddingModelName || '—'}</span>
+              </div>
+              <div className="flex items-center justify-between py-1.5">
+                <span className="text-[12px] text-[var(--text-secondary)]">Chiều</span>
+                <span className="text-[12px] text-[var(--text-primary)] font-mono">{embeddingDimensions || '—'}</span>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <Button variant="secondary" size="sm" onClick={handleTestEmbedding} disabled={embeddingTestStatus === 'testing'}>
+                  {embeddingTestStatus === 'testing' ? (
+                    <><Loader2 size={14} className="animate-spin" /> Đang kiểm tra...</>
+                  ) : (
+                    <>Kiểm tra</>
+                  )}
+                </Button>
+
+                {embeddingTestStatus === 'success' && (
+                  <span className="flex items-center gap-1 text-[12px] text-[var(--status-success-text)]">
+                    <CheckCircle size={14} /> {embeddingTestDims} dims, {embeddingTestLatency}ms
+                  </span>
+                )}
+                {embeddingTestStatus === 'error' && (
+                  <span className="flex items-center gap-1 text-[12px] text-[var(--status-error-text)]">
+                    <AlertCircle size={14} /> {embeddingTestError}
                   </span>
                 )}
               </div>
@@ -412,10 +496,17 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           >
             {saving ? (
               <><Loader2 size={14} className="animate-spin" /> Đang lưu...</>
+            ) : saveStatus === 'success' ? (
+              <><CheckCircle size={14} /> Đã lưu thành công</>
             ) : (
               'Lưu cài đặt'
             )}
           </Button>
+          {saveStatus === 'error' && (
+            <p className="text-[11px] text-[var(--status-error-text)] text-center flex items-center justify-center gap-1">
+              <AlertCircle size={12} /> {saveError || 'Lưu cài đặt thất bại'}
+            </p>
+          )}
 
           <p className="text-[11px] text-[var(--text-tertiary)] text-center">
             {APP_NAME} v{APP_VERSION}

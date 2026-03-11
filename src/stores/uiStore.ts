@@ -40,7 +40,7 @@ const getInitialTheme = (): 'light' | 'dark' => {
     const stored = localStorage.getItem('cortex-theme')
     if (stored === 'dark' || stored === 'light') return stored
   } catch {}
-  return 'light'
+  return 'dark'
 }
 
 // Apply theme to document

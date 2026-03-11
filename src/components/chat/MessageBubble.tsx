@@ -6,7 +6,7 @@ import mermaid from 'mermaid'
 import { Brain, User, Copy, Check, FolderTree, ThumbsUp, ThumbsDown, FileText } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { Message } from '../../types'
-import { MessageSkeleton } from './TypingIndicator'
+import { TypingIndicator } from './TypingIndicator'
 import { ThinkingProcess } from './ThinkingProcess'
 import { useChatStore } from '../../stores/chatStore'
 
@@ -114,6 +114,51 @@ function MessageCopyButton({ text, onCopy }: { text: string; onCopy?: () => void
       {copied ? <Check size={13} /> : <Copy size={13} />}
     </button>
   )
+}
+
+/**
+ * Fix inline numbered lists/bullets that LLMs produce on a single line.
+ * "1. A 2. B - sub1 - sub2 3. C" → proper multi-line markdown.
+ * Skips code fences. Guards against false positives (dashes in words like "re-fetch").
+ */
+function normalizeMarkdownLists(content: string): string {
+  const lines = content.split('\n')
+  const result: string[] = []
+  let insideCodeFence = false
+
+  for (const line of lines) {
+    if (line.trimStart().startsWith('```') || line.trimStart().startsWith('~~~')) {
+      insideCodeFence = !insideCodeFence
+      result.push(line)
+      continue
+    }
+    if (insideCodeFence) {
+      result.push(line)
+      continue
+    }
+
+    const numberedMatches = line.match(/\d+\.\s/g)
+    if (numberedMatches && numberedMatches.length >= 2) {
+      const expanded = line
+        // "\n" before "N. " when preceded by non-whitespace (not start of line)
+        .replace(/(?<=\S)\s+(\d+\.\s)/g, '\n$1')
+        // "\n   - " before bullet sub-items; match any non-whitespace before the space-dash
+        .replace(/(\S)\s+(- )(?=[A-Z])/g, '$1\n   $2')
+      result.push(expanded)
+      continue
+    }
+
+    const bulletMatches = line.match(/(?:^|\s)- \S/g)
+    if (bulletMatches && bulletMatches.length >= 2) {
+      const expanded = line.replace(/(\S)\s+(- )(?=[A-Z])/g, '$1\n$2')
+      result.push(expanded)
+      continue
+    }
+
+    result.push(line)
+  }
+
+  return result.join('\n')
 }
 
 // =====================
@@ -369,15 +414,18 @@ function StreamingContent({ conversationId }: { conversationId: string }) {
 }
 
 const MemoizedMarkdown = ({ content }: { content: string }) => {
-  const rendered = useMemo(() => (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
-      components={markdownComponents}
-    >
-      {content}
-    </ReactMarkdown>
-  ), [content])
+  const rendered = useMemo(() => {
+    const normalized = normalizeMarkdownLists(content)
+    return (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+        components={markdownComponents}
+      >
+        {normalized}
+      </ReactMarkdown>
+    )
+  }, [content])
   return rendered
 }
 
@@ -413,7 +461,8 @@ export function MessageBubble({ message, onFeedback, onCopy }: MessageBubbleProp
             'w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5',
             isUser
               ? 'bg-[var(--bg-sidebar-active)]'
-              : 'bg-[var(--accent-light)]'
+              : 'bg-[var(--accent-light)]',
+            !isUser && (isStreamingEmpty || message.isStreaming) && 'avatar-pulse'
           )}
         >
           {isUser ? (
@@ -432,7 +481,7 @@ export function MessageBubble({ message, onFeedback, onCopy }: MessageBubbleProp
           {isStreamingEmpty ? (
             <div className="stream-fade-in">
               {thinkingSteps.length > 0 && <ThinkingProcess steps={thinkingSteps} />}
-              {(!thinkingSteps.length || thinkingSteps.every(s => s.status !== 'running')) && <MessageSkeleton />}
+              {(!thinkingSteps.length || thinkingSteps.every(s => s.status !== 'running')) && <TypingIndicator />}
             </div>
           ) : isUser ? (
             <div>

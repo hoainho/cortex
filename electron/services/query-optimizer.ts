@@ -88,9 +88,7 @@ export function recordQueryPattern(projectId: string, query: string, matchedPath
       id,
       projectId,
       pattern,
-      JSON.stringify(matchedPaths.slice(0, 10)),
-      1,
-      Date.now()
+      JSON.stringify(matchedPaths.slice(0, 10))
     )
   } catch (err) {
     console.error('[QueryOptimizer] Failed to record pattern:', err)

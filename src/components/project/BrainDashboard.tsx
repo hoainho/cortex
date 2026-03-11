@@ -204,10 +204,10 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
     setExportResult('')
     try {
       const result = await window.electronAPI.exportBrain(projectId)
-      if (result.success) {
+      if (result) {
         setExportResult(`Đã export ${result.chunks} chunks, ${result.conversations} cuộc trò chuyện`)
       } else {
-        setExportResult(result.error || 'Export thất bại')
+        setExportResult('Export đã bị hủy')
       }
     } catch {
       setExportResult('Lỗi export')
@@ -219,8 +219,10 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
   const handleImport = async () => {
     try {
       const result = await window.electronAPI.importBrain()
-      if (result.success) {
+      if (result) {
         setExportResult(`Đã import ${result.chunks} chunks thành công`)
+      } else {
+        setExportResult('Import đã bị hủy')
       }
     } catch {
       setExportResult('Lỗi import')

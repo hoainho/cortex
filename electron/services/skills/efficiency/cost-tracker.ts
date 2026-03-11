@@ -18,12 +18,26 @@ export function initCostSchema(): void {
       output_tokens INTEGER DEFAULT 0,
       cached_tokens INTEGER DEFAULT 0,
       cost REAL DEFAULT 0,
+      compressed_original INTEGER DEFAULT 0,
+      compressed_final INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );
     CREATE INDEX IF NOT EXISTS idx_usage_project ON token_usage(project_id);
     CREATE INDEX IF NOT EXISTS idx_usage_model ON token_usage(model);
     CREATE INDEX IF NOT EXISTS idx_usage_date ON token_usage(created_at);
   `)
+
+  // Migration: add compression columns to existing tables
+  try {
+    const cols = db.prepare("PRAGMA table_info(token_usage)").all() as Array<{ name: string }>
+    const colNames = cols.map(c => c.name)
+    if (!colNames.includes('compressed_original')) {
+      db.exec('ALTER TABLE token_usage ADD COLUMN compressed_original INTEGER DEFAULT 0')
+    }
+    if (!colNames.includes('compressed_final')) {
+      db.exec('ALTER TABLE token_usage ADD COLUMN compressed_final INTEGER DEFAULT 0')
+    }
+  } catch {}
 }
 
 export function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
@@ -39,12 +53,17 @@ export function recordUsage(params: {
   outputTokens: number
   cachedTokens?: number
   cost: number
+  compressedOriginal?: number
+  compressedFinal?: number
 }): void {
   try {
     const db = getDb()
     const complexity = classifyComplexity(params.model)
-    db.prepare('INSERT INTO token_usage (id, project_id, model, input_tokens, output_tokens, cached_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-      randomUUID(), params.projectId || null, params.model, params.inputTokens, params.outputTokens, params.cachedTokens || 0, params.cost
+    db.prepare(
+      'INSERT INTO token_usage (id, project_id, model, input_tokens, output_tokens, cached_tokens, cost, compressed_original, compressed_final) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      randomUUID(), params.projectId || null, params.model, params.inputTokens, params.outputTokens,
+      params.cachedTokens || 0, params.cost, params.compressedOriginal || 0, params.compressedFinal || 0
     )
     console.log(`[CostTracker] Recorded usage: model=${params.model}, complexity=${complexity}, cost=${params.cost}`)
   } catch (err) {
@@ -109,6 +128,22 @@ export function getDailyCosts(projectId: string, days: number = 7): Array<{ date
   } catch (err) {
     console.error('[CostTracker] Daily costs failed:', err)
     return []
+  }
+}
+
+export function getCompressionStats(projectId: string): { tokensOriginal: number, tokensCompressed: number, savingsPercent: number } {
+  try {
+    const db = getDb()
+    const result = db.prepare(
+      'SELECT SUM(compressed_original) as orig, SUM(compressed_final) as final FROM token_usage WHERE project_id = ? AND compressed_original > 0'
+    ).get(projectId) as { orig: number | null, final: number | null }
+    const orig = result.orig || 0
+    const final = result.final || 0
+    const percent = orig > 0 ? Math.round(((orig - final) / orig) * 100) : 0
+    return { tokensOriginal: orig, tokensCompressed: final, savingsPercent: percent }
+  } catch (err) {
+    console.error('[CostTracker] Compression stats failed:', err)
+    return { tokensOriginal: 0, tokensCompressed: 0, savingsPercent: 0 }
   }
 }
 

@@ -23,8 +23,9 @@ export function ChatArea() {
 
   // Model selector state
   const [activeModel, setActiveModel] = useState<string>('loading...')
-  const [availableModels, setAvailableModels] = useState<Array<{ id: string; tier: number; active: boolean }>>([])
+  const [availableModels, setAvailableModels] = useState<Array<{ id: string; tier: number; active: boolean; status: string }>>([])
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const [isRefreshingModels, setIsRefreshingModels] = useState(false)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
 
 
@@ -116,14 +117,19 @@ export function ChatArea() {
     return () => { cleanup?.() }
   }, [])
 
-  // Fetch available LLM models on mount
   useEffect(() => {
     const fetchModels = async () => {
       try {
         const model = await window.electronAPI?.getActiveModel?.()
         if (model) setActiveModel(model)
         const models = await window.electronAPI?.getAvailableModels?.()
-        if (models) setAvailableModels(models)
+        if (models) {
+          setAvailableModels(models)
+          const nonReady = models.filter(m => m.status !== 'ready')
+          if (nonReady.length > 0) {
+            console.log(`[Models] ${models.length} models loaded, non-ready:`, nonReady.map(m => `${m.id}(${m.status})`))
+          }
+        }
       } catch (err) {
         console.error('Failed to fetch models:', err)
       }
@@ -159,6 +165,32 @@ export function ChatArea() {
     }
     setModelDropdownOpen(false)
   }, [])
+
+  const handleRefreshModels = useCallback(async () => {
+    setIsRefreshingModels(true)
+    try {
+      const models = await window.electronAPI?.refreshModelsWithCheck?.()
+      if (models) {
+        setAvailableModels(models)
+        const active = models.find(m => m.active)
+        if (active) setActiveModel(active.id)
+        const byStatus = models.reduce((acc, m) => { acc[m.status] = (acc[m.status] || 0) + 1; return acc }, {} as Record<string, number>)
+        console.log(`[Models] Hard refresh result:`, byStatus)
+      }
+    } catch (err) {
+      console.error('Failed to refresh models:', err)
+    } finally {
+      setIsRefreshingModels(false)
+    }
+  }, [])
+
+  const sortedModels = [...availableModels].sort((a, b) => {
+    const statusOrder: Record<string, number> = { ready: 0, quota_exhausted: 1, unavailable: 2 }
+    const orderA = statusOrder[a.status] ?? 1
+    const orderB = statusOrder[b.status] ?? 1
+    if (orderA !== orderB) return orderA - orderB
+    return b.tier - a.tier
+  })
 
   // Load repo info + auto-start file watcher when project changes
   useEffect(() => {
@@ -276,7 +308,7 @@ export function ChatArea() {
     )
   }, [activeProjectId, validConversation])
 
-  const handleSend = useCallback(async (content: string, attachments?: import('../../types').ChatAttachment[]) => {
+  const handleSend = useCallback(async (content: string, attachments?: import('../../types').ChatAttachment[], agentModeId?: string | null) => {
     if (!activeProjectId) return
 
     let convId: string | null | undefined = validConversation?.id
@@ -312,7 +344,8 @@ export function ChatArea() {
         content,
         mode,
         history,
-        attachments
+        attachments,
+        agentModeId || undefined
       )
 
       if (result.success) {
@@ -407,37 +440,74 @@ export function ChatArea() {
               )}
             >
               <Cpu size={12} />
+              <span className={cn(
+                'w-1.5 h-1.5 rounded-full',
+                (() => {
+                  const current = availableModels.find(m => m.id === activeModel)
+                  if (!current || current.status === 'ready') return 'bg-emerald-500'
+                  if (current.status === 'quota_exhausted') return 'bg-amber-400'
+                  return 'bg-red-500'
+                })()
+              )} />
               <span className="max-w-[120px] truncate font-mono">{activeModel}</span>
               <ChevronDown size={11} className={cn('transition-transform', modelDropdownOpen && 'rotate-180')} />
             </button>
 
-            {modelDropdownOpen && availableModels.length > 0 && (
-              <div className="absolute top-full right-0 mt-1 w-64 max-h-[300px] overflow-y-auto bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-xl shadow-lg z-50">
+            {modelDropdownOpen && sortedModels.length > 0 && (
+              <div className="absolute top-full right-0 mt-1 w-72 max-h-[340px] overflow-y-auto bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-xl shadow-lg z-50">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-primary)]">
+                  <span className="text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">Models</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleRefreshModels() }}
+                    disabled={isRefreshingModels}
+                    className={cn(
+                      'p-1 rounded-md transition-all',
+                      'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]',
+                      'hover:bg-[var(--bg-sidebar-hover)]',
+                      'disabled:opacity-50'
+                    )}
+                    title="Kiểm tra lại trạng thái models"
+                  >
+                    <RefreshCw size={12} className={cn(isRefreshingModels && 'animate-spin')} />
+                  </button>
+                </div>
                 <div className="p-1">
-                  {availableModels.map((model) => (
-                    <button
-                      key={model.id}
-                      onClick={() => handleModelSelect(model.id)}
-                      className={cn(
-                        'w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg text-left transition-all',
-                        'text-[12px] font-mono',
-                        model.active
-                          ? 'bg-[var(--accent-light)] text-[var(--accent-primary)]'
-                          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-sidebar-hover)]'
-                      )}
-                    >
-                      <span className="truncate">{model.id}</span>
-                      <span className={cn(
-                        'shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-sans',
-                        model.tier >= 8 ? 'bg-[var(--tier-high-bg)] text-[var(--tier-high-text)]' :
-                        model.tier >= 6 ? 'bg-[var(--tier-mid-bg)] text-[var(--tier-mid-text)]' :
-                        model.tier >= 4 ? 'bg-[var(--tier-low-bg)] text-[var(--tier-low-text)]' :
-                        'bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)]'
-                      )}>
-                        T{model.tier}
-                      </span>
-                    </button>
-                  ))}
+                  {sortedModels.map((model) => {
+                    const isReady = model.status === 'ready'
+                    const isQuotaExhausted = model.status === 'quota_exhausted'
+
+                    return (
+                      <button
+                        key={model.id}
+                        onClick={() => handleModelSelect(model.id)}
+                        className={cn(
+                          'w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left transition-all',
+                          'text-[12px] font-mono',
+                          model.active
+                            ? 'bg-[var(--accent-light)] text-[var(--accent-primary)]'
+                            : 'text-[var(--text-secondary)] hover:bg-[var(--bg-sidebar-hover)]',
+                          !isReady && 'opacity-50'
+                        )}
+                      >
+                        <span className={cn(
+                          'shrink-0 w-1.5 h-1.5 rounded-full',
+                          isReady && 'bg-emerald-500',
+                          isQuotaExhausted && 'bg-amber-400',
+                          !isReady && !isQuotaExhausted && 'bg-red-500'
+                        )} />
+                        <span className="truncate flex-1">{model.id}</span>
+                        <span className={cn(
+                          'shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-sans',
+                          model.tier >= 8 ? 'bg-[var(--tier-high-bg)] text-[var(--tier-high-text)]' :
+                          model.tier >= 6 ? 'bg-[var(--tier-mid-bg)] text-[var(--tier-mid-text)]' :
+                          model.tier >= 4 ? 'bg-[var(--tier-low-bg)] text-[var(--tier-low-text)]' :
+                          'bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)]'
+                        )}>
+                          T{model.tier}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -642,6 +712,17 @@ export function ChatArea() {
       {/* Input */}
       <ChatInput
         onSend={handleSend}
+        onStop={() => {
+          if (validConversation?.id) {
+            window.electronAPI.abortChat(validConversation.id)
+          }
+        }}
+        isStreaming={
+          validConversation
+            ? validConversation.messages.length > 0 &&
+              validConversation.messages[validConversation.messages.length - 1].isStreaming === true
+            : false
+        }
         disabled={activeProject.brainStatus !== 'ready'}
         placeholder={
           activeProject.brainStatus === 'ready'

@@ -3,12 +3,17 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
+/** Default timeout for MCP tool calls: 5 minutes (browser automation, long tasks) */
+const DEFAULT_TOOL_TIMEOUT_MS = 300_000
+
 export interface MCPClientConfig {
   serverUrl?: string
   transportType: 'stdio' | 'sse'
   command?: string
   args?: string[]
   env?: Record<string, string>
+  /** Per-request timeout in ms. Defaults to 5 minutes. Set 0 for no timeout. */
+  requestTimeoutMs?: number
 }
 
 export interface MCPTool {
@@ -97,7 +102,8 @@ export function createMCPClient(config: MCPClientConfig): MCPClient {
 
     async listTools(): Promise<MCPTool[]> {
       if (!client || !connected) throw new Error('MCP client not connected')
-      const result = await client.listTools()
+      const timeout = config.requestTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS
+      const result = await client.listTools(undefined, timeout > 0 ? { timeout } : undefined)
       return (result.tools || []).map(t => ({
         name: t.name,
         description: t.description || '',
@@ -107,7 +113,12 @@ export function createMCPClient(config: MCPClientConfig): MCPClient {
 
     async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
       if (!client || !connected) throw new Error('MCP client not connected')
-      const result = await client.callTool({ name, arguments: args })
+      const timeout = config.requestTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS
+      const result = await client.callTool(
+        { name, arguments: args },
+        undefined,
+        timeout > 0 ? { timeout } : undefined
+      )
       if (result.content && Array.isArray(result.content)) {
         const textParts = result.content
           .filter((c: { type: string }) => c.type === 'text')
@@ -119,7 +130,8 @@ export function createMCPClient(config: MCPClientConfig): MCPClient {
 
     async listResources(): Promise<MCPResource[]> {
       if (!client || !connected) throw new Error('MCP client not connected')
-      const result = await client.listResources()
+      const timeout = config.requestTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS
+      const result = await client.listResources(undefined, timeout > 0 ? { timeout } : undefined)
       return (result.resources || []).map(r => ({
         uri: r.uri,
         name: r.name,
@@ -130,7 +142,8 @@ export function createMCPClient(config: MCPClientConfig): MCPClient {
 
     async readResource(uri: string): Promise<string> {
       if (!client || !connected) throw new Error('MCP client not connected')
-      const result = await client.readResource({ uri })
+      const timeout = config.requestTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS
+      const result = await client.readResource({ uri }, timeout > 0 ? { timeout } : undefined)
       const contents = result.contents || []
       if (contents.length > 0 && 'text' in contents[0]) {
         return (contents[0] as { text: string }).text

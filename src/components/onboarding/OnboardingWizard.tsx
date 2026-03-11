@@ -1,63 +1,76 @@
-import { useState } from 'react'
-import { Brain, Server, Rocket, ArrowRight, ArrowLeft, CheckCircle, Loader2 } from 'lucide-react'
-import { cn } from '../../lib/utils'
-import { Button } from '../ui/Button'
-import { Input } from '../ui/Input'
-import { useUIStore } from '../../stores/uiStore'
-import { APP_VERSION } from '../../lib/version'
+import { useState } from "react";
+import {
+  Brain,
+  Server,
+  Rocket,
+  ArrowRight,
+  ArrowLeft,
+  CheckCircle,
+  Loader2,
+} from "lucide-react";
+import { cn } from "../../lib/utils";
+import { Button } from "../ui/Button";
+import { Input } from "../ui/Input";
+import { useUIStore } from "../../stores/uiStore";
+import { APP_VERSION } from "../../lib/version";
 
 interface OnboardingWizardProps {
-  open: boolean
-  onComplete: () => void
+  open: boolean;
+  onComplete: () => void;
 }
 
 const STEPS = [
-  { icon: Brain, label: 'Chào mừng' },
-  { icon: Server, label: 'Cài đặt' },
-  { icon: Rocket, label: 'Bắt đầu' }
-]
+  { icon: Brain, label: "Chào mừng" },
+  { icon: Server, label: "Cài đặt" },
+  { icon: Rocket, label: "Bắt đầu" },
+];
 
 export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
-  const [step, setStep] = useState(0)
-  const [proxyUrl, setProxyUrl] = useState('https://proxy.hoainho.info')
-  const [proxyKey, setProxyKey] = useState('hoainho')
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<'idle' | 'success' | 'error'>('idle')
-  const [testError, setTestError] = useState('')
+  const [step, setStep] = useState(0);
+  const [proxyUrl, setProxyUrl] = useState("http://localhost:3456");
+  const [proxyKey, setProxyKey] = useState("hoainho");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<"idle" | "success" | "error">(
+    "idle",
+  );
+  const [testError, setTestError] = useState("");
 
-  const { openNewProjectModal } = useUIStore()
+  const { openNewProjectModal } = useUIStore();
 
   const handleTestProxy = async () => {
-    setTesting(true)
-    setTestResult('idle')
+    setTesting(true);
+    setTestResult("idle");
     try {
-      const result = await window.electronAPI.testProxyConnection(proxyUrl, proxyKey)
+      const result = await window.electronAPI.testProxyConnection(
+        proxyUrl,
+        proxyKey,
+      );
       if (result.success) {
-        setTestResult('success')
+        setTestResult("success");
       } else {
-        setTestResult('error')
-        setTestError(result.error || 'Kết nối thất bại')
+        setTestResult("error");
+        setTestError(result.error || "Kết nối thất bại");
       }
     } catch {
-      setTestResult('error')
-      setTestError('Lỗi kết nối')
+      setTestResult("error");
+      setTestError("Lỗi kết nối");
     } finally {
-      setTesting(false)
+      setTesting(false);
     }
-  }
+  };
 
   const handleSaveProxy = async () => {
-    await window.electronAPI.setProxyConfig(proxyUrl, proxyKey)
-    setStep(2)
-  }
+    await window.electronAPI.setProxyConfig(proxyUrl, proxyKey);
+    setStep(2);
+  };
 
   const handleFinish = async () => {
-    await window.electronAPI.completeOnboarding()
-    onComplete()
-    openNewProjectModal()
-  }
+    await window.electronAPI.completeOnboarding();
+    onComplete();
+    openNewProjectModal();
+  };
 
-  if (!open) return null
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
@@ -72,12 +85,12 @@ export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
             <div key={i} className="flex items-center gap-2">
               <div
                 className={cn(
-                  'w-8 h-8 rounded-full flex items-center justify-center transition-all',
+                  "w-8 h-8 rounded-full flex items-center justify-center transition-all",
                   i === step
-                    ? 'bg-[var(--accent-primary)] text-white'
+                    ? "bg-[var(--accent-primary)] text-white"
                     : i < step
-                      ? 'bg-[var(--status-success-bg)] text-[var(--status-success-text)]'
-                      : 'bg-[var(--bg-secondary)] text-[var(--text-tertiary)]'
+                      ? "bg-[var(--status-success-bg)] text-[var(--status-success-text)]"
+                      : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)]",
                 )}
               >
                 {i < step ? <CheckCircle size={16} /> : <s.icon size={16} />}
@@ -85,8 +98,10 @@ export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
               {i < STEPS.length - 1 && (
                 <div
                   className={cn(
-                    'w-12 h-0.5 rounded-full',
-                    i < step ? 'bg-[var(--status-success-text)]' : 'bg-[var(--border-primary)]'
+                    "w-12 h-0.5 rounded-full",
+                    i < step
+                      ? "bg-[var(--status-success-text)]"
+                      : "bg-[var(--border-primary)]",
                   )}
                 />
               )}
@@ -106,8 +121,9 @@ export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
                 Chào mừng đến với Cortex
               </h2>
               <p className="text-[14px] text-[var(--text-secondary)] leading-relaxed max-w-[380px]">
-                Cortex là bộ não AI hiểu codebase của bạn. Import repository, đặt câu hỏi,
-                và nhận phân tích chuyên sâu ở chế độ PM hoặc Engineering.
+                Cortex là bộ não AI hiểu codebase của bạn. Import repository,
+                đặt câu hỏi, và nhận phân tích chuyên sâu ở chế độ PM hoặc
+                Engineering.
               </p>
               <p className="text-[12px] text-[var(--text-tertiary)]">
                 Phiên bản {APP_VERSION}
@@ -142,7 +158,9 @@ export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
 
               <div className="space-y-3">
                 <div>
-                  <label className="block text-[12px] text-[var(--text-secondary)] mb-1">Proxy URL</label>
+                  <label className="block text-[12px] text-[var(--text-secondary)] mb-1">
+                    Proxy URL
+                  </label>
                   <Input
                     value={proxyUrl}
                     onChange={(e) => setProxyUrl(e.target.value)}
@@ -150,7 +168,9 @@ export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
                   />
                 </div>
                 <div>
-                  <label className="block text-[12px] text-[var(--text-secondary)] mb-1">API Key</label>
+                  <label className="block text-[12px] text-[var(--text-secondary)] mb-1">
+                    API Key
+                  </label>
                   <Input
                     type="password"
                     value={proxyKey}
@@ -161,20 +181,30 @@ export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
               </div>
 
               <div className="flex items-center gap-2">
-                <Button variant="secondary" size="sm" onClick={handleTestProxy} disabled={testing}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleTestProxy}
+                  disabled={testing}
+                >
                   {testing ? (
-                    <><Loader2 size={14} className="animate-spin" /> Đang kiểm tra...</>
+                    <>
+                      <Loader2 size={14} className="animate-spin" /> Đang kiểm
+                      tra...
+                    </>
                   ) : (
-                    'Kiểm tra kết nối'
+                    "Kiểm tra kết nối"
                   )}
                 </Button>
-                {testResult === 'success' && (
+                {testResult === "success" && (
                   <span className="flex items-center gap-1 text-[12px] text-[var(--status-success-text)]">
                     <CheckCircle size={14} /> Kết nối thành công
                   </span>
                 )}
-                {testResult === 'error' && (
-                  <span className="text-[12px] text-[var(--status-error-text)]">{testError}</span>
+                {testResult === "error" && (
+                  <span className="text-[12px] text-[var(--status-error-text)]">
+                    {testError}
+                  </span>
                 )}
               </div>
 
@@ -191,7 +221,10 @@ export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
           {step === 2 && (
             <div className="flex flex-col items-center text-center gap-4">
               <div className="w-16 h-16 rounded-2xl bg-[var(--status-success-bg)] flex items-center justify-center">
-                <Rocket size={32} className="text-[var(--status-success-text)]" />
+                <Rocket
+                  size={32}
+                  className="text-[var(--status-success-text)]"
+                />
               </div>
               <h2 className="text-[22px] font-bold text-[var(--text-primary)] tracking-tight">
                 Sẵn sàng!
@@ -210,5 +243,5 @@ export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
         </div>
       </div>
     </div>
-  )
+  );
 }

@@ -8,7 +8,7 @@
 import { safeStorage } from 'electron'
 import { getDb } from './db'
 
-const DEFAULT_PROXY_URL = 'https://proxy.hoainho.info'
+const DEFAULT_PROXY_URL = 'http://localhost:3456'
 const DEFAULT_PROXY_KEY = 'hoainho'
 
 export function initSettingsTable(): void {
@@ -43,14 +43,16 @@ export function getSetting(key: string): string | null {
 export function setSetting(key: string, value: string, encrypted: boolean = false): void {
   const db = getDb()
   let storedValue = value
+  let actuallyEncrypted = false
 
   if (encrypted && safeStorage.isEncryptionAvailable()) {
     storedValue = safeStorage.encryptString(value).toString('base64')
+    actuallyEncrypted = true
   }
 
   db.prepare(
     'INSERT OR REPLACE INTO settings (key, value, encrypted, updated_at) VALUES (?, ?, ?, ?)'
-  ).run(key, storedValue, encrypted ? 1 : 0, Date.now())
+  ).run(key, storedValue, actuallyEncrypted ? 1 : 0, Date.now())
 }
 
 export function getProxyUrl(): string {

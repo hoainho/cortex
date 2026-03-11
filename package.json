@@ -1,6 +1,7 @@
 {
   "name": "cortex",
-  "version": "2.0.0",
+  "productName": "Cortex",
+  "version": "3.0.0",
   "description": "Cortex — The brain that knows your codebase",
   "main": "./out/main/index.js",
   "type": "module",
@@ -8,7 +9,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "postinstall": "electron-builder install-app-deps",
+    "postinstall": "electron-builder install-app-deps && node scripts/patch-electron-name.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:mac": "electron-vite build && electron-builder --mac --publish never",
@@ -19,6 +20,7 @@
   },
   "dependencies": {
     "@electron-toolkit/utils": "^3.0.0",
+    "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "better-sqlite3": "^12.6.2",
     "clsx": "^2.1.1",
@@ -29,6 +31,7 @@
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
+    "sharp": "^0.34.5",
     "web-tree-sitter": "^0.26.6",
     "zustand": "^5.0.0"
   },

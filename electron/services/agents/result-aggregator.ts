@@ -28,7 +28,10 @@ const ROLE_LABELS: Record<AgentRole, string> = {
   sisyphus: 'Sisyphus (Ultraworker)',
   hephaestus: 'Hephaestus (Deep Agent)',
   prometheus: 'Prometheus (Strategic Planner)',
-  atlas: 'Atlas (Heavy Lifter)'
+  atlas: 'Atlas (Heavy Lifter)',
+  oracle: 'Oracle (Consultant)',
+  explore: 'Explore (Contextual Grep)',
+  librarian: 'Librarian (Reference Grep)'
 }
 
 // =====================
