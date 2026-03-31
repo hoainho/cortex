@@ -8,6 +8,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://github.com/hoainho/cortex/releases)
 [![Built With](https://img.shields.io/badge/built%20with-Electron%20%2B%20React%20%2B%20TypeScript-61DAFB.svg)](#tech-stack)
+[![Coverage](https://img.shields.io/badge/coverage-50%25-yellow.svg)](#development)
 
 A desktop AI assistant that deeply understands your entire codebase — not a ChatGPT wrapper, but a full engineering intelligence platform with persistent memory, multi-agent orchestration, and self-learning.
 
@@ -181,7 +182,7 @@ App idle (2+ min)
 
 **Circuit Breaker** — protects against runaway costs:
 - 3 consecutive LLM failures → pause 30 min (half-open probe → resume if ok)
-- Daily budget exceeded ($0.50 default) → pause until midnight reset
+- Daily budget exceeded ($100 default) → pause until midnight reset
 - Live status visible in AutoScan dashboard: state / daily cost / budget
 
 **Bias Prevention** — keeps training data healthy:
@@ -197,7 +198,7 @@ App idle (2+ min)
 [AutoTraining][25/03/2026 23:14:11] [Code/factual] services/llm-client.ts | Q: "What does..."
 [Learning][25/03/2026 23:14:14]   Luu pair | score=4.3 | "What does sanitizeTemperature do..."
 [AutoScan][25/03/2026 23:14:35]   [Jira] 18 issues | bat dau phan tich sprint/bug/team...
-[Circuit] OPEN — daily budget $0.51 exceeded $0.50
+[Circuit] OPEN — daily budget $100.01 exceeded $100.00
 ```
 
 ---

@@ -200,7 +200,7 @@ interface CircuitBreakerState {
 const CIRCUIT_CONFIG = {
  maxFailures: 3,
  openDurationMs: 30 * 60 * 1000,   // stay open 30 min then half-open
- defaultDailyBudgetUsd: 0.50,       // $0.50/day default
+ defaultDailyBudgetUsd: 100.00,      // $100/day default
  costPerPair: 0.002,                // ~$0.002 per accepted pair estimate
 }
 
@@ -354,69 +354,76 @@ async function callLLM(
   max_tokens: maxTokens
  })
 
- const MAX_NETWORK_RETRIES = 2
- const NETWORK_RETRY_DELAY_MS = 3_000
+  const MAX_NETWORK_RETRIES = 2
+  const NETWORK_RETRY_DELAY_MS = 3_000
+  const FETCH_TIMEOUT_MS = 30_000
 
- for (let attempt = 0; attempt <= MAX_NETWORK_RETRIES; attempt++) {
-  if (attempt > 0) {
-   logTrain(`[Retry ${attempt}/${MAX_NETWORK_RETRIES}] Network error — waiting ${NETWORK_RETRY_DELAY_MS}ms | ${label ?? '?'}`)
-   await sleep(NETWORK_RETRY_DELAY_MS)
-   lastRequestAt = Date.now()
-  }
-
-  const t0 = Date.now()
-  try {
-   const response = await fetch(`${getProxyUrl()}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-     'Content-Type': 'application/json',
-     Authorization: `Bearer ${getProxyKey()}`
-    },
-    body
-   })
-
-   const elapsed = Date.now() - t0
-
-   if (response.status === 429) {
-    const retryAfterHeader = response.headers.get('retry-after')
-    const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1000 : 0
-    logTrain(`[RATE LIMIT] 429 trên "${label ?? '?'}" — dừng training ngay lập tức`)
-    throw new RateLimitError(label ?? '?', retryAfterMs)
+  for (let attempt = 0; attempt <= MAX_NETWORK_RETRIES; attempt++) {
+   if (attempt > 0) {
+    logTrain(`[Retry ${attempt}/${MAX_NETWORK_RETRIES}] Network error — waiting ${NETWORK_RETRY_DELAY_MS}ms | ${label ?? '?'}`)
+    await sleep(NETWORK_RETRY_DELAY_MS)
+    lastRequestAt = Date.now()
    }
 
-   if (response.status === 503) {
-    if (attempt < MAX_NETWORK_RETRIES) continue
+   const t0 = Date.now()
+   const controller = new AbortController()
+   const fetchTimer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+   try {
+    const response = await fetch(`${getProxyUrl()}/v1/chat/completions`, {
+     method: 'POST',
+     headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getProxyKey()}`
+     },
+     body,
+     signal: controller.signal
+    })
+    clearTimeout(fetchTimer)
+
+    const elapsed = Date.now() - t0
+
+    if (response.status === 429) {
+     const retryAfterHeader = response.headers.get('retry-after')
+     const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1000 : 0
+     logTrain(`[RATE LIMIT] 429 trên "${label ?? '?'}" — dừng training ngay lập tức`)
+     throw new RateLimitError(label ?? '?', retryAfterMs)
+    }
+
+    if (response.status === 503) {
+     if (attempt < MAX_NETWORK_RETRIES) continue
+     consecutiveErrors++
+     recordCircuitFailure()
+     logTrain(`LLM 503 (${elapsed}ms) | ${label ?? '?'}`)
+     return ''
+    }
+
+    if (!response.ok) {
+     consecutiveErrors++
+     recordCircuitFailure()
+     logTrain(`LLM ${response.status} (${elapsed}ms) | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
+     return ''
+    }
+
+    consecutiveErrors = 0
+    recordCircuitSuccess()
+    const data = await response.json() as { choices: Array<{ message: { content: string } }> }
+    logTrain(`LLM ok ${elapsed}ms | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
+    return data.choices?.[0]?.message?.content || ''
+   } catch (err) {
+    clearTimeout(fetchTimer)
+    if (err instanceof RateLimitError) throw err
+    const elapsed = Date.now() - t0
+    const msg = (err as Error).message
+    const isNetworkError = msg.includes('fetch failed') || msg.includes('ECONNRESET') ||
+     msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('socket') ||
+     (err as Error).name === 'AbortError'
+    if (isNetworkError && attempt < MAX_NETWORK_RETRIES) continue
     consecutiveErrors++
     recordCircuitFailure()
-    logTrain(`LLM 503 (${elapsed}ms) | ${label ?? '?'}`)
+    logTrain(`LLM failed (${elapsed}ms) | ${label ?? '?'} | ${msg}`)
     return ''
    }
-
-   if (!response.ok) {
-    consecutiveErrors++
-    recordCircuitFailure()
-    logTrain(`LLM ${response.status} (${elapsed}ms) | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
-    return ''
-   }
-
-   consecutiveErrors = 0
-   recordCircuitSuccess()
-   const data = await response.json() as { choices: Array<{ message: { content: string } }> }
-   logTrain(`LLM ok ${elapsed}ms | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
-   return data.choices?.[0]?.message?.content || ''
-  } catch (err) {
-   if (err instanceof RateLimitError) throw err
-   const elapsed = Date.now() - t0
-   const msg = (err as Error).message
-   const isNetworkError = msg.includes('fetch failed') || msg.includes('ECONNRESET') ||
-    msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('socket')
-   if (isNetworkError && attempt < MAX_NETWORK_RETRIES) continue
-   consecutiveErrors++
-   recordCircuitFailure()
-   logTrain(`LLM failed (${elapsed}ms) | ${label ?? '?'} | ${msg}`)
-   return ''
   }
- }
 
  return ''
 }

@@ -55,10 +55,10 @@ export function MessageList({ messages, onFeedback, onCopy, searchMatchIds, sear
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto px-6"
+        className="h-full overflow-y-auto overflow-x-hidden"
         style={{ scrollBehavior: 'smooth' }}
       >
-        <div className="max-w-[900px] mx-auto">
+        <div className="w-full max-w-[900px] mx-auto px-5 xl:px-6">
           {messages.map((message) => (
             <MessageBubble
               key={message.id}

@@ -13,6 +13,7 @@ import { BrowserWindow, ipcMain } from 'electron'
 import type { SearchResult } from './vector-search'
 import { getProxyUrl, getProxyKey, getSetting, setSetting } from './settings-service'
 import { compressContext, type CompressionStats } from './context-compressor'
+import { normalizeResponseFences } from './response-normalizer'
 
 function getProxyUrlSafe(): string { return getProxyUrl() }
 function getProxyKeySafe(): string { return getProxyKey() }
@@ -937,7 +938,7 @@ async function _streamWithModel(
   if (finishReason !== 'tool_calls') {
     window?.webContents.send('chat:stream', {
       conversationId,
-      content: fullContent,
+      content: normalizeResponseFences(fullContent),
       done: true
     })
   }

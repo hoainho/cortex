@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, useMemo, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
+import remarkGithubAlerts from 'remark-github-markdown-alerts'
+import rehypeRaw from 'rehype-raw'
+import { MessageBlock } from './MessageBlock'
 import mermaid from 'mermaid'
 import { Brain, User, Copy, Check, FolderTree, ThumbsUp, ThumbsDown, FileText, Download, Maximize2, X, BookOpen } from 'lucide-react'
 import { cn } from '../../lib/utils'
@@ -142,10 +145,19 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="absolute top-2 right-2 p-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-primary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-all opacity-0 group-hover:opacity-100"
-      title="Copy code"
+      className={cn(
+        'flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-all duration-200',
+        copied
+          ? 'bg-[var(--status-success-bg)] text-[var(--status-success-text)]'
+          : 'bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'
+      )}
+      title={copied ? 'Copied!' : 'Copy code'}
+      aria-label={copied ? 'Copied!' : 'Copy code'}
     >
-      {copied ? <Check size={13} /> : <Copy size={13} />}
+      <span className={cn('transition-all duration-200', copied ? 'scale-100' : 'scale-100')}>
+        {copied ? <Check size={12} /> : <Copy size={12} />}
+      </span>
+      <span>{copied ? 'Copied' : 'Copy'}</span>
     </button>
   )
 }
@@ -176,8 +188,18 @@ function MessageCopyButton({ text, onCopy }: { text: string; onCopy?: () => void
  * "1. A 2. B - sub1 - sub2 3. C" → proper multi-line markdown.
  * Skips code fences. Guards against false positives (dashes in words like "re-fetch").
  */
+function normalizePlainFencesToText(content: string): string {
+  return content.replace(/^```\s*\n([\s\S]*?)^```/gm, (match, body: string) => {
+    if (isProseMessage(body.trim())) {
+      return '```text\n' + body + '```'
+    }
+    return match
+  })
+}
+
 function normalizeMarkdownLists(content: string): string {
-  const lines = content.split('\n')
+  const normalized = normalizePlainFencesToText(content)
+  const lines = normalized.split('\n')
   const result: string[] = []
   let insideCodeFence = false
 
@@ -222,10 +244,8 @@ function normalizeMarkdownLists(content: string): string {
 const TREE_CHARS = /[├└│─┌┐┘┤┬┴┼]/
 const TREE_PATTERN = /[├└│].*[─┬]/
 
-/** Detect if text contains a directory/file tree structure */
 function hasTreeStructure(text: string): boolean {
   const lines = text.split('\n')
-  // Need at least 2 lines with tree characters to be a tree
   let treeLines = 0
   for (const line of lines) {
     if (TREE_PATTERN.test(line) || (TREE_CHARS.test(line) && line.trim().length > 2)) {
@@ -236,18 +256,80 @@ function hasTreeStructure(text: string): boolean {
   return false
 }
 
+function classifyBlock(text: string): 'prose' | 'code' | 'unknown' {
+  const lines = text.split('\n').filter(l => l.trim())
+  if (lines.length < 2) return 'unknown'
+
+  // Hard exits — definitive code indicators
+  const CODE_HARD = /^(import |export |const |let |var |async |function |class |return |if \(|for \(|while \(|switch \(|#!\/|<\?php|package |use strict|def |print\(|echo |SELECT |INSERT |UPDATE |DELETE |FROM |WHERE |\{|\})/m
+  if (CODE_HARD.test(text)) return 'code'
+
+  // Markdown structural elements → not a prose message
+  const MARKDOWN_STRUCTURAL = /^(#{1,6}\s|```|~~~|---|\*\*\*|___|\|.*\|)/m
+  if (MARKDOWN_STRUCTURAL.test(text)) return 'unknown'
+
+  // Hard exits — definitive prose indicators (structural, not keyword)
+  const PROSE_HARD = /^[-*]\s.{10,}/m  // bullet list with real content = prose
+  const hasSentences = lines.filter(l => /[.!?]\s*$/.test(l.trim()) && l.trim().length > 20).length
+  if (hasSentences >= 2) return 'prose'
+
+  // Statistical scoring — each returns 0 (code-like) to 1 (prose-like)
+  const chars = text.replace(/\s/g, '')
+  const alphaCount = (text.match(/[a-zA-ZÀ-ỹ]/g) ?? []).length
+  const specialCount = (text.match(/[{}[\]()=><|&^%$#@!*;:]/g) ?? []).length
+  const totalChars = chars.length || 1
+
+  const alphaRatio = alphaCount / totalChars            // prose >0.75, code <0.60
+  const specialRatio = specialCount / totalChars        // prose <0.05, code >0.08
+
+  const words = text.match(/[a-zA-ZÀ-ỹ]+/g) ?? []
+  const avgWordLen = words.length ? words.reduce((s, w) => s + w.length, 0) / words.length : 0
+  // prose: avg 4–5.5 chars/word; code identifiers: 6–15
+
+  const lineLengths = lines.map(l => l.length)
+  const avgLen = lineLengths.reduce((s, n) => s + n, 0) / (lineLengths.length || 1)
+  const variance = lineLengths.reduce((s, n) => s + Math.abs(n - avgLen), 0) / (lineLengths.length || 1)
+  // prose: high variance (mixed length); code: low variance (structured indent)
+
+  const sentencePunct = (text.match(/[.!?]/g) ?? []).length / (words.length || 1)
+  // prose: 0.08–0.20; code: <0.04
+
+  // Score each dimension: 1 = prose-like
+  const scores = [
+    alphaRatio > 0.72 ? 1 : alphaRatio > 0.60 ? 0.5 : 0,
+    specialRatio < 0.04 ? 1 : specialRatio < 0.08 ? 0.5 : 0,
+    avgWordLen < 6 ? 1 : avgWordLen < 8 ? 0.5 : 0,
+    variance > 15 ? 1 : variance > 8 ? 0.5 : 0,
+    sentencePunct > 0.06 ? 1 : sentencePunct > 0.02 ? 0.5 : 0,
+    PROSE_HARD.test(text) ? 1 : 0,
+  ]
+
+  const proseScore = scores.reduce((s, n) => s + n, 0) / scores.length
+
+  if (proseScore >= 0.65) return 'prose'
+  if (proseScore <= 0.35) return 'code'
+  return 'unknown'
+}
+
+function isProseMessage(text: string): boolean {
+  return classifyBlock(text) === 'prose'
+}
+
+
 /** Render a directory tree in a styled container */
 function TreeBlock({ content }: { content: string }) {
   return (
-    <div className="relative group my-3">
-      <div className="flex items-center gap-1.5 px-4 py-1.5 bg-[var(--bg-secondary)] border border-[var(--border-primary)] border-b-0 rounded-t-xl">
-        <FolderTree size={12} className="text-[var(--accent-primary)]" />
-        <span className="text-[11px] font-medium text-[var(--text-tertiary)]">Cấu trúc thư mục</span>
+    <div className="rounded-xl overflow-hidden border border-[var(--border-primary)] my-3">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--bg-tertiary)] border-b border-[var(--border-primary)]">
+        <div className="flex items-center gap-1.5">
+          <FolderTree size={12} className="text-[var(--accent-primary)]" />
+          <span className="text-[11px] font-medium text-[var(--text-tertiary)]">Cấu trúc thư mục</span>
+        </div>
+        <CopyButton text={content} />
       </div>
-      <pre className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-b-xl p-4 overflow-x-auto !mt-0 !rounded-t-none">
+      <pre className="bg-[var(--bg-secondary)] p-4 overflow-x-auto m-0">
         <code className="text-[13px] font-mono leading-[1.6] text-[var(--text-primary)]">{content}</code>
       </pre>
-      <CopyButton text={content} />
     </div>
   )
 }
@@ -434,6 +516,13 @@ const markdownComponents = {
       return <MermaidBlock code={codeString} />
     }
 
+    if (lang === 'message' || lang === 'text') {
+      const firstNewline = codeString.indexOf('\n')
+      const title = firstNewline !== -1 ? codeString.slice(0, firstNewline).trim() : ''
+      const body = firstNewline !== -1 ? codeString.slice(firstNewline + 1).trim() : codeString.trim()
+      return <MessageBlock title={title} content={body} renderContent={(c) => <MemoizedMarkdown content={c} />} />
+    }
+
     // Fenced code block (has language class)
     if (lang) {
       // Detect tree structure inside fenced code blocks too
@@ -441,29 +530,34 @@ const markdownComponents = {
         return <TreeBlock content={codeString} />
       }
       return (
-        <div className="relative group">
-          <div className="flex items-center justify-between px-4 py-1.5 bg-[var(--bg-secondary)] border border-[var(--border-primary)] border-b-0 rounded-t-xl">
-            <span className="text-[11px] font-mono text-[var(--text-tertiary)] uppercase">{lang}</span>
+        <div className="rounded-xl overflow-hidden border border-[var(--border-primary)] my-3">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--bg-tertiary)] border-b border-[var(--border-primary)]">
+            <span className="text-[11px] font-mono font-medium text-[var(--text-tertiary)] uppercase tracking-wide">{lang}</span>
+            <CopyButton text={codeString} />
           </div>
-          <pre className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-b-xl p-4 overflow-x-auto !mt-0 !rounded-t-none">
-            <code className={cn(className, 'text-[13px] font-mono')} {...props}>
+          <pre className="bg-[var(--bg-secondary)] p-4 overflow-x-auto m-0">
+            <code className={cn(className, 'text-[13px] font-mono leading-relaxed')} {...props}>
               {children}
             </code>
           </pre>
-          <CopyButton text={codeString} />
         </div>
       )
     }
 
-    // Unfenced code block — check if it's a tree structure
-    if (codeString.includes('\n') && hasTreeStructure(codeString)) {
-      return <TreeBlock content={codeString} />
+    // Unfenced multiline block — detect tree or prose message
+    if (codeString.includes('\n')) {
+      if (hasTreeStructure(codeString)) {
+        return <TreeBlock content={codeString} />
+      }
+      if (isProseMessage(codeString)) {
+        return <MessageBlock title="" content={codeString} renderContent={(c) => <MemoizedMarkdown content={c} />} />
+      }
     }
 
     // Inline code
     return (
       <code
-        className="bg-[var(--bg-secondary)] px-1.5 py-0.5 rounded text-[13px] font-mono"
+        className="bg-[var(--bg-sidebar)] text-[var(--accent-primary)] px-1.5 py-0.5 rounded text-[13px] font-mono whitespace-nowrap border border-[var(--border-primary)]"
         {...props}
       >
         {children}
@@ -532,7 +626,7 @@ const markdownComponents = {
   },
   blockquote({ children }: { children?: ReactNode }) {
     return (
-      <blockquote className="border-l-3 border-[var(--accent-primary)] pl-4 my-3 text-[var(--text-secondary)] italic">{children}</blockquote>
+      <blockquote className="border-l-4 border-[var(--accent-primary)] bg-[var(--accent-light)]/20 pl-4 pr-3 py-2 my-3 rounded-r-lg text-[var(--text-secondary)] not-italic">{children}</blockquote>
     )
   },
   img({ src, alt }: { src?: string; alt?: string }) {
@@ -610,6 +704,8 @@ const EMPTY_STEPS: { step: 'sanitize' | 'rag' | 'external_context' | 'web_search
 
 function StreamingContent({ conversationId }: { conversationId: string }) {
   const [displayContent, setDisplayContent] = useState('')
+  const rafRef = useRef<number | null>(null)
+  const pendingRef = useRef<string>('')
 
   useEffect(() => {
     const unsub = useChatStore.subscribe((state) => {
@@ -622,9 +718,22 @@ function StreamingContent({ conversationId }: { conversationId: string }) {
         .replace(/\[CORTEX_IMG:[^\]]+\]/g, '🎨 Image generated!')
         .replace(/CORTEX_IMAGE_PATH:[^\n]+/g, '')
         .trim()
-      setDisplayContent(cleaned || (raw.includes('tool_call') || raw.includes('CORTEX_IMG') ? '🎨 Generating image...' : ''))
+      pendingRef.current = cleaned || (raw.includes('tool_call') || raw.includes('CORTEX_IMG') ? '🎨 Generating image...' : '')
+
+      if (rafRef.current === null) {
+        rafRef.current = requestAnimationFrame(() => {
+          setDisplayContent(pendingRef.current)
+          rafRef.current = null
+        })
+      }
     })
-    return () => unsub()
+    return () => {
+      unsub()
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+    }
   }, [conversationId])
 
   return (
@@ -714,11 +823,11 @@ function ContentWithImages({ content, searchQuery }: { content: string; searchQu
 const MemoizedMarkdown = ({ content, searchQuery }: { content: string; searchQuery?: string }) => {
   const rendered = useMemo(() => {
     const normalized = normalizeMarkdownLists(content)
-    const rehypePlugins: Parameters<typeof ReactMarkdown>[0]['rehypePlugins'] = [rehypeHighlight]
+    const rehypePlugins: Parameters<typeof ReactMarkdown>[0]['rehypePlugins'] = [rehypeRaw, rehypeHighlight]
     if (searchQuery) rehypePlugins.push(makeRehypeSearchHighlight(searchQuery))
     return (
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkGithubAlerts]}
         rehypePlugins={rehypePlugins}
         urlTransform={cortexUrlTransform}
         components={markdownComponents}
@@ -740,9 +849,8 @@ export function MessageBubble({ message, onFeedback, onCopy, isSearchMatch, isSe
       <div
         className={cn(
           'flex gap-3 py-5',
-          'max-w-[900px] mx-auto',
-          isSearchCurrent && 'bg-[var(--accent-primary)]/8 -mx-6 px-6 rounded-xl',
-          isSearchMatch && !isSearchCurrent && 'bg-[var(--accent-primary)]/4 -mx-6 px-6 rounded-xl'
+          isSearchCurrent && 'bg-[var(--accent-primary)]/8 -mx-5 px-5 xl:-mx-6 xl:px-6 rounded-xl',
+          isSearchMatch && !isSearchCurrent && 'bg-[var(--accent-primary)]/4 -mx-5 px-5 xl:-mx-6 xl:px-6 rounded-xl'
         )}
       >
         {/* Avatar */}
@@ -763,7 +871,7 @@ export function MessageBubble({ message, onFeedback, onCopy, isSearchMatch, isSe
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-w-0 relative group/message">
+        <div className="flex-1 min-w-0 overflow-hidden relative group/message">
           <div className="text-[12px] font-medium text-[var(--text-tertiary)] mb-1">
             {isUser ? 'Bạn' : 'Cortex'}
           </div>

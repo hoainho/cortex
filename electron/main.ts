@@ -41,6 +41,7 @@ import { getAutoScanProgress, getAutoScanConfig, setAutoScanConfig } from './ser
 import { initTrainingEngine, shutdownTrainingEngine, triggerManualTraining } from './services/training/training-engine'
 import { notifyPostChat, notifyChatStarted, notifyChatEnded } from './services/training/training-scheduler'
 import { trainFromPairs, getLearnedWeightCount } from './services/learned-reranker'
+import { normalizeResponseFences } from './services/response-normalizer'
 import { initDefaultVariant } from './services/query-optimizer'
 import { estimateTokens } from './services/context-compressor'
 import { registerContextSource, extractAndFetchAllContext } from './services/context-registry'
@@ -947,7 +948,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
             agentResponse = `**${skillName}** returned empty. Skill may not have matched the query or encountered a silent failure.\n\nQuery: ${slashQuery.slice(0, 200)}`
           }
 
-          mainWindow?.webContents.send('chat:stream', { conversationId, content: agentResponse, done: true })
+          mainWindow?.webContents.send('chat:stream', { conversationId, content: normalizeResponseFences(agentResponse), done: true })
 
           try {
             const agentDb = getDb()
@@ -1026,7 +1027,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
                 projectId, conversationId, query, response: orchResponse,
                 model: routedModel, metadata: { path: 'orchestrate', bgTasks }
               }, emitThinking)
-              mainWindow?.webContents.send('chat:stream', { conversationId, content: orchResponse, done: true })
+              mainWindow?.webContents.send('chat:stream', { conversationId, content: normalizeResponseFences(orchResponse), done: true })
               persistAssistantResponse(conversationId, orchResponse)
               notifyChatEnded()
               notifyPostChat(projectId)
@@ -1056,7 +1057,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
                 model: routedModel, metadata: { path: 'skill_chain' }
               }, emitThinking)
 
-              mainWindow?.webContents.send('chat:stream', { conversationId, content: reactResult.content, done: true })
+              mainWindow?.webContents.send('chat:stream', { conversationId, content: normalizeResponseFences(reactResult.content), done: true })
               persistAssistantResponse(conversationId, reactResult.content)
               notifyChatEnded()
               notifyPostChat(projectId)
@@ -1174,7 +1175,7 @@ Return ONLY the enhanced prompt, nothing else.`
           if (orchResult.useMermaid && orchResult.mermaidCode) {
             emitThinking('tool_call', 'done', 'Diagram generated', `Mermaid.js (${orchResult.category})`)
             const diagramResponse = `\`\`\`mermaid\n${orchResult.mermaidCode}\n\`\`\``
-            mainWindow?.webContents.send('chat:stream', { conversationId, content: diagramResponse, done: true })
+            mainWindow?.webContents.send('chat:stream', { conversationId, content: normalizeResponseFences(diagramResponse), done: true })
             persistAssistantResponse(conversationId, diagramResponse)
             recordSkillCall('mermaid_diagram', true, 0)
 
@@ -1547,7 +1548,7 @@ Return ONLY the enhanced prompt, nothing else.`
             } catch { /* best-effort */ }
 
             // Stream cached response to renderer
-            mainWindow?.webContents.send('chat:stream', { conversationId, content: cached.response, done: true })
+            mainWindow?.webContents.send('chat:stream', { conversationId, content: normalizeResponseFences(cached.response), done: true })
 
             return {
               success: true,
@@ -1768,7 +1769,7 @@ Return ONLY the enhanced prompt, nothing else.`
             const imageBlock = `[CORTEX_IMG:${imgPath}]\n\n*Saved: ${imgPath} (${sizeKB}KB)*`
             mainWindow?.webContents.send('chat:generatedImage', { conversationId, path: imgPath, base64: imgB64, sizeKB })
             response = response ? `${imageBlock}\n\n${response}` : imageBlock
-            mainWindow?.webContents.send('chat:stream', { conversationId, content: response, done: true })
+            mainWindow?.webContents.send('chat:stream', { conversationId, content: normalizeResponseFences(response), done: true })
           } catch {
             if (!response) {
               response = `Image generated at: ${imgPath}`

@@ -509,3 +509,69 @@ pre code {
 [data-theme="dark"] .hljs-attr { color: #79C0FF !important; }
 [data-theme="dark"] .hljs-selector-class { color: #7EE787 !important; }
 [data-theme="dark"] .hljs-selector-tag { color: #7EE787 !important; }
+
+/* ======================================
+   GitHub Markdown Alerts
+   remark-github-markdown-alerts styles
+   ====================================== */
+.markdown-alert {
+  border-left: 4px solid;
+  border-radius: 0 8px 8px 0;
+  padding: 10px 14px;
+  margin: 12px 0;
+}
+.markdown-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.markdown-alert-title svg {
+  width: 16px;
+  height: 16px;
+}
+.markdown-alert p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-alert-note {
+  border-color: var(--accent-primary);
+  background-color: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+}
+.markdown-alert-note .markdown-alert-title {
+  color: var(--accent-primary);
+}
+
+.markdown-alert-tip {
+  border-color: #3fb950;
+  background-color: color-mix(in srgb, #3fb950 8%, transparent);
+}
+.markdown-alert-tip .markdown-alert-title {
+  color: #3fb950;
+}
+
+.markdown-alert-important {
+  border-color: #a371f7;
+  background-color: color-mix(in srgb, #a371f7 8%, transparent);
+}
+.markdown-alert-important .markdown-alert-title {
+  color: #a371f7;
+}
+
+.markdown-alert-warning {
+  border-color: #d29922;
+  background-color: color-mix(in srgb, #d29922 8%, transparent);
+}
+.markdown-alert-warning .markdown-alert-title {
+  color: #d29922;
+}
+
+.markdown-alert-caution {
+  border-color: #f85149;
+  background-color: color-mix(in srgb, #f85149 8%, transparent);
+}
+.markdown-alert-caution .markdown-alert-title {
+  color: #f85149;
+}

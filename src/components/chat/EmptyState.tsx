@@ -1,7 +1,14 @@
-import { Brain, FolderOpen, Github, Sparkles, Bot, Zap, Search, Shield } from 'lucide-react'
+import { Brain, FolderOpen, Github, Sparkles, Bot, Zap, Search, Shield, Code, Bug, ListChecks, Wrench } from 'lucide-react'
 import { useProjectStore } from '../../stores/projectStore'
 import { useUIStore } from '../../stores/uiStore'
 import { APP_VERSION } from '../../lib/version'
+
+const QUICK_ACTIONS = [
+  { icon: Code, label: 'Architecture', color: 'text-blue-500' },
+  { icon: Bug, label: 'Find bugs', color: 'text-red-400' },
+  { icon: ListChecks, label: 'Review', color: 'text-green-500' },
+  { icon: Wrench, label: 'Refactor', color: 'text-amber-500' },
+]
 
 const V3_FEATURES = [
   { icon: Bot, label: 'Agent Modes', detail: 'Sisyphus, Hephaestus, Prometheus, Atlas' },
@@ -17,7 +24,7 @@ export function EmptyState() {
 
   if (!activeProject) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="h-full flex items-center justify-center">
         <div className="text-center max-w-[460px] px-6">
           <div className="w-16 h-16 rounded-2xl bg-[var(--accent-light)] flex items-center justify-center mx-auto mb-6">
             <Brain size={32} className="text-[var(--accent-primary)]" />
@@ -73,20 +80,32 @@ export function EmptyState() {
   }
 
   return (
-    <div className="flex-1 flex items-center justify-center">
-      <div className="text-center max-w-[420px] px-6">
-        <div className="w-14 h-14 rounded-2xl bg-[var(--accent-light)] flex items-center justify-center mx-auto mb-5">
-          <Brain size={28} className="text-[var(--accent-primary)]" />
+    <div className="h-full flex items-center justify-center">
+      <div className="text-center max-w-[400px] px-6">
+        <div className="w-16 h-16 rounded-2xl bg-[var(--accent-light)] flex items-center justify-center mx-auto mb-5 shadow-sm">
+          <Brain size={30} className="text-[var(--accent-primary)]" />
         </div>
         <h2 className="text-[20px] font-semibold text-[var(--text-primary)] tracking-tight mb-1">
           {activeProject.brainName}
         </h2>
-        <p className="text-[var(--text-tertiary)] text-[13px] mb-3">
+        <p className="text-[var(--text-tertiary)] text-[12px] mb-4">
           {activeProject.name}
         </p>
-        <p className="text-[var(--text-secondary)] text-[15px] leading-relaxed">
-          Hỏi bất kỳ điều gì về dự án. Tôi đã phân tích toàn bộ source code và sẵn sàng trả lời.
+        <p className="text-[var(--text-secondary)] text-[14px] leading-relaxed mb-8">
+          Hỏi bất kỳ điều gì về dự án — tôi đã sẵn sàng.
         </p>
+
+        <div className="flex items-center justify-center gap-3">
+          {QUICK_ACTIONS.map(({ icon: Icon, label, color }) => (
+            <div
+              key={label}
+              className="flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-primary)] hover:border-[var(--accent-primary)]/30 hover:bg-[var(--accent-light)]/20 transition-all duration-150 cursor-default"
+            >
+              <Icon size={16} className={color} />
+              <span className="text-[10px] font-medium text-[var(--text-tertiary)]">{label}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

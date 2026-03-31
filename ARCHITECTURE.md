@@ -68,9 +68,9 @@
 |  +--------------------------------------------------------------+ |
 |  |                    BRAIN ENGINE (Data Layer)                   | |
 |  |  +----------+  +----------+  +----------+  +-----------+    | |
-|  |  | Embedder |  | ChromaDB |  | Graph DB |  | SQLite    |    | |
-|  |  | (Voyage/ |  | (vectors)|  | (entities|  | (metadata |    | |
-|  |  |  custom) |  |          |  |  + edges)|  |  + memory) |    | |
+|  |  | Embedder |  | Qdrant / |  | Graph DB |  | SQLite    |    | |
+|  |  | (Voyage/ |  | SQLite   |  | (entities|  | (metadata |    | |
+|  |  |  custom) |  | Hybrid   |  |  + edges)|  |  + memory) |    | |
 |  |  +----------+  +----------+  +----------+  +-----------+    | |
 |  +--------------------------------------------------------------+ |
 |                              |                                     |
@@ -196,7 +196,7 @@ User Query
 |  +----------------------+  |
 |  | project_context:     |  |  - Project tech stack, architecture
 |  |   'Electron + React, |  |  - Key decisions, conventions
-|  |    ChromaDB, SQLite'  |  |
+|  |    Qdrant, SQLite'   |  |
 |  +----------------------+  |
   |  | preferences:         |  |  - Response format, detail level
   |  |   'Detailed code     |  |  - Auto-updated from behavior
@@ -208,7 +208,7 @@ User Query
 +============================+
 |     ARCHIVAL MEMORY        |  <-- Long-term, vector-searchable, unlimited size
 |  +----------------------+  |
-|  | Past decisions       |  |  - 'We chose ChromaDB because...'
+|  | Past decisions       |  |  - 'We chose Qdrant because...'
 |  | Code patterns found  |  |  - 'Auth uses middleware pattern...'
 |  | Debugging insights   |  |  - 'Race condition fix: use mutex...'
 |  | Session summaries    |  |  - Auto-generated at session end
