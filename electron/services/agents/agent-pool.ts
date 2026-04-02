@@ -15,7 +15,7 @@ import type {
   AgentTask, AgentOutput, AgentInput, PoolConfig, ModelTier, AgentStatus
 } from './types'
 import { getProxyUrl, getProxyKey } from '../settings-service'
-import { sanitizeTemperature, getAvailableModels, fetchAvailableModels } from '../llm-client'
+import { sanitizeTemperature, getAvailableModels, fetchAvailableModels, sanitizeSurrogates } from '../llm-client'
 import { getAgentOverride } from '../plugin-config'
 
 // =====================
@@ -128,13 +128,13 @@ function buildAgentMessages(task: AgentTask): Array<{ role: string; content: str
 
   // Append shared context
   if (ctx.coreMemory) {
-    systemContent += '\n\n=== MEMORY ===\n' + ctx.coreMemory
+    systemContent += '\n\n=== MEMORY ===\n' + sanitizeSurrogates(ctx.coreMemory)
   }
 
   if (ctx.archivalMemories.length > 0) {
     const archival = ctx.archivalMemories
       .slice(0, 5)
-      .map((m, i) => `[${i + 1}] (score: ${m.score.toFixed(2)}) ${m.content}`)
+      .map((m, i) => `[${i + 1}] (score: ${m.score.toFixed(2)}) ${sanitizeSurrogates(m.content)}`)
       .join('\n')
     systemContent += '\n\n=== ARCHIVAL MEMORIES ===\n' + archival
   }
@@ -144,19 +144,19 @@ function buildAgentMessages(task: AgentTask): Array<{ role: string; content: str
       .slice(0, 10)
       .map((c, i) => {
         const header = `--- [${i + 1}] ${c.relativePath} :: ${c.name || ''} (${c.chunkType}, ${c.language}) L${c.lineStart}-${c.lineEnd}`
-        return `${header}\n${c.content}`
+        return `${header}\n${sanitizeSurrogates(c.content)}`
       })
       .join('\n\n')
     systemContent += '\n\n=== CODE CONTEXT ===\n' + chunks
   }
 
   if (ctx.directoryTree) {
-    systemContent += '\n\n=== DIRECTORY STRUCTURE ===\n' + ctx.directoryTree.slice(0, 2000)
+    systemContent += '\n\n=== DIRECTORY STRUCTURE ===\n' + sanitizeSurrogates(ctx.directoryTree.slice(0, 2000))
   }
 
-  let userContent = input.query
+  let userContent = sanitizeSurrogates(input.query)
   if (input.instructions) {
-    userContent += '\n\n[Orchestrator Instructions]: ' + input.instructions
+    userContent += '\n\n[Orchestrator Instructions]: ' + sanitizeSurrogates(input.instructions)
   }
 
   return [

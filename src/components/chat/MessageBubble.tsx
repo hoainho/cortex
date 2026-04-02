@@ -517,10 +517,7 @@ const markdownComponents = {
     }
 
     if (lang === 'message' || lang === 'text') {
-      const firstNewline = codeString.indexOf('\n')
-      const title = firstNewline !== -1 ? codeString.slice(0, firstNewline).trim() : ''
-      const body = firstNewline !== -1 ? codeString.slice(firstNewline + 1).trim() : codeString.trim()
-      return <MessageBlock title={title} content={body} renderContent={(c) => <MemoizedMarkdown content={c} />} />
+      return <MessageBlock content={codeString.trim()} renderContent={(c) => <MemoizedMarkdown content={c} />} />
     }
 
     // Fenced code block (has language class)
@@ -550,7 +547,7 @@ const markdownComponents = {
         return <TreeBlock content={codeString} />
       }
       if (isProseMessage(codeString)) {
-        return <MessageBlock title="" content={codeString} renderContent={(c) => <MemoizedMarkdown content={c} />} />
+        return <MessageBlock content={codeString} renderContent={(c) => <MemoizedMarkdown content={c} />} />
       }
     }
 

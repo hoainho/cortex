@@ -3,12 +3,11 @@ import { Copy, Check } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 interface MessageBlockProps {
-  title: string
   content: string
   renderContent?: (content: string) => React.ReactNode
 }
 
-export function MessageBlock({ title, content, renderContent }: MessageBlockProps) {
+export function MessageBlock({ content, renderContent }: MessageBlockProps) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = () => {
@@ -22,10 +21,6 @@ export function MessageBlock({ title, content, renderContent }: MessageBlockProp
       <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--bg-sidebar)] border-b border-[var(--border-primary)]">
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] font-semibold uppercase tracking-widest text-[var(--text-tertiary)]">Text</span>
-          {title && <>
-            <span className="text-[11px] text-[var(--text-tertiary)]">·</span>
-            <span className="text-[12px] font-medium text-[var(--text-secondary)] truncate max-w-[360px]">{title}</span>
-          </>}
         </div>
         <button
           onClick={handleCopy}

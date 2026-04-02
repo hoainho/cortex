@@ -18,6 +18,18 @@ import { normalizeResponseFences } from './response-normalizer'
 function getProxyUrlSafe(): string { return getProxyUrl() }
 function getProxyKeySafe(): string { return getProxyKey() }
 
+/**
+ * Remove lone UTF-16 surrogates (\uD800–\uDFFF) from a string.
+ * These arise when web content (emoji, special chars) is scraped and the surrogate
+ * pairs are broken apart. Anthropic's backend rejects them with a utf-8 codec error.
+ * We replace each lone surrogate with the Unicode replacement character (U+FFFD).
+ */
+export function sanitizeSurrogates(str: string): string {
+  // Regex matches any lone high surrogate (\uD800-\uDBFF) not followed by a low surrogate,
+  // or any lone low surrogate (\uDC00-\uDFFF) not preceded by a high surrogate.
+  return str.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD')
+}
+
 export type ChatMode = 'pm' | 'engineering'
 
 export interface ToolCallFunction {
@@ -590,7 +602,7 @@ CHECK YOUR TOOL LIST before responding. If a tool can handle the request, USE IT
     systemContent += `\n2. Bạn KHÔNG cần truy cập URL — dữ liệu đã có sẵn ngay bên dưới.`
     systemContent += `\n3. TUYỆT ĐỐI KHÔNG ĐƯỢC nói "tôi không thể truy cập URL". Bạn ĐÃ CÓ dữ liệu.`
     systemContent += `\n4. Hãy phân tích nội dung bên dưới và trả lời trực tiếp dựa trên dữ liệu này.`
-    systemContent += `\n\n${externalContext}`
+    systemContent += `\n\n${sanitizeSurrogates(externalContext)}`
   }
 
   const messages: ChatMessage[] = [{ role: 'system', content: systemContent }]
@@ -602,7 +614,7 @@ CHECK YOUR TOOL LIST before responding. If a tool can handle the request, USE IT
   }
 
   // Add current user query
-  messages.push({ role: 'user', content: query })
+  messages.push({ role: 'user', content: sanitizeSurrogates(query) })
 
   return { messages, compressionStats }
 }
@@ -747,10 +759,15 @@ async function _streamWithModel(
 ): Promise<StreamResult> {
   console.log(`[LLM] Using model: ${model}`)
 
+  const sanitizedMessages = messages.map(m => ({
+    ...m,
+    content: typeof m.content === 'string' ? sanitizeSurrogates(m.content) : m.content
+  }))
+
   const isGpt5 = /gpt-5(?!\.\d)/.test(model) || model.includes('gpt-5-') || model.includes('gpt-5-codex')
   const body: Record<string, unknown> = {
     model,
-    messages,
+    messages: sanitizedMessages,
     stream: true,
     stream_options: { include_usage: true },
     max_tokens: 16384
