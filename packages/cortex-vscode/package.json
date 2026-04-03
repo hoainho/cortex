@@ -1,0 +1,61 @@
+{
+  "name": "cortex-vscode",
+  "displayName": "Cortex — AI Brain for VS Code",
+  "description": "Cortex AI assistant integrated into VS Code — Phase 3 scaffold",
+  "version": "5.0.0-alpha.1",
+  "publisher": "cortex",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["AI", "Machine Learning", "Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "cortex.openChat", "title": "Cortex: Open Chat" },
+      { "command": "cortex.askAboutSelection", "title": "Cortex: Ask About Selection" },
+      { "command": "cortex.explainFunction", "title": "Cortex: Explain Function" },
+      { "command": "cortex.reviewFile", "title": "Cortex: Review Current File" },
+      { "command": "cortex.reloadAgents", "title": "Cortex: Reload Agents" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "cortex", "title": "Cortex", "icon": "$(brain)" }
+      ]
+    },
+    "views": {
+      "cortex": [
+        { "id": "cortex.chat", "name": "Chat", "type": "webview" },
+        { "id": "cortex.agents", "name": "Agents" },
+        { "id": "cortex.memory", "name": "Memory" }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        { "command": "cortex.askAboutSelection", "when": "editorHasSelection", "group": "cortex" },
+        { "command": "cortex.explainFunction", "group": "cortex" }
+      ]
+    },
+    "configuration": {
+      "title": "Cortex",
+      "properties": {
+        "cortex.daemonPort": {
+          "type": "number",
+          "default": 27182,
+          "description": "Port for Cortex daemon connection"
+        },
+        "cortex.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-connect to Cortex daemon on startup"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -watch -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.7.2"
+  }
+}

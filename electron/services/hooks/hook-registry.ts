@@ -1,4 +1,4 @@
-import type { HookDefinition, HookTrigger, HookPriority, HookStats } from './types'
+import type { HookDefinition, HttpHookDefinition, AnyHookDefinition, HookTrigger, HookPriority, HookStats } from './types'
 import { isHookDisabled } from '../plugin-config'
 
 const PRIORITY_ORDER: Record<HookPriority, number> = {
@@ -8,14 +8,14 @@ const PRIORITY_ORDER: Record<HookPriority, number> = {
   low: 3
 }
 
-const hooks = new Map<string, HookDefinition>()
+const hooks = new Map<string, AnyHookDefinition>()
 const stats = new Map<string, HookStats>()
 
 function defaultStats(): HookStats {
   return { totalExecutions: 0, successCount: 0, errorCount: 0, avgLatencyMs: 0, lastExecutedAt: null }
 }
 
-export function registerHook(hook: HookDefinition): void {
+export function registerHook(hook: AnyHookDefinition): void {
   hooks.set(hook.id, hook)
   if (!stats.has(hook.id)) {
     stats.set(hook.id, defaultStats())
@@ -28,8 +28,8 @@ export function unregisterHook(id: string): boolean {
   return existed
 }
 
-export function getHooksByTrigger(trigger: HookTrigger): HookDefinition[] {
-  const matched: HookDefinition[] = []
+export function getHooksByTrigger(trigger: HookTrigger): AnyHookDefinition[] {
+  const matched: AnyHookDefinition[] = []
   for (const hook of hooks.values()) {
     if (!hook.enabled) continue
     if (isHookDisabled(hook.name)) continue
@@ -41,7 +41,7 @@ export function getHooksByTrigger(trigger: HookTrigger): HookDefinition[] {
   return matched.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority])
 }
 
-export function listHooks(): Array<HookDefinition & { stats: HookStats }> {
+export function listHooks(): Array<AnyHookDefinition & { stats: HookStats }> {
   return Array.from(hooks.values()).map(hook => ({
     ...hook,
     stats: stats.get(hook.id) || defaultStats()

@@ -9,6 +9,10 @@ import { registerBrainIPC } from './brain.ipc'
 import { registerProjectIPC } from './project.ipc'
 import { registerSettingsIPC } from './settings.ipc'
 import { registerEvaluationIPC } from './evaluation.ipc'
+import { registerAppInsightsIPC } from './appinsights.ipc'
+import { registerSlackIPC } from './slack.ipc'
+import { registerCortexMdIPC } from './cortex-md.ipc'
+import { registerAgentsIPC } from './agents.ipc'
 
 export function registerAllIPC(
   ipcMain: IpcMain,
@@ -25,4 +29,8 @@ export function registerAllIPC(
   registerProjectIPC(ipcMain, app, getMainWindow)
   registerSettingsIPC(ipcMain, getMainWindow)
   registerEvaluationIPC(ipcMain)
+  registerAppInsightsIPC(ipcMain, getMainWindow)
+  registerSlackIPC(ipcMain, getMainWindow)
+  registerCortexMdIPC(ipcMain)
+  registerAgentsIPC(ipcMain)
 }

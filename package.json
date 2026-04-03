@@ -1,7 +1,7 @@
 {
   "name": "cortex",
   "productName": "Cortex",
-  "version": "4.5.0",
+  "version": "5.0.0-alpha.1",
   "description": "Cortex — The brain that knows your codebase",
   "main": "./out/main/index.js",
   "type": "module",

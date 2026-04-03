@@ -11,6 +11,20 @@ import type { CoreMemorySection, CoreMemoryEntry, DbCoreMemory } from './types'
 const MAX_CORE_TOKENS = 4000
 const MAX_SECTION_TOKENS = 1000
 
+const cortexMdCache = new Map<string, string>()
+
+export function setCortexMdContent(projectId: string, content: string): void {
+  if (content.trim()) {
+    cortexMdCache.set(projectId, content.trim())
+  } else {
+    cortexMdCache.delete(projectId)
+  }
+}
+
+export function getCortexMdContent(projectId: string): string | null {
+  return cortexMdCache.get(projectId) ?? null
+}
+
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
@@ -99,12 +113,17 @@ export function deleteCoreMemory(projectId: string, section: CoreMemorySection):
 
 export function getCoreMemoryForPrompt(projectId: string): string {
   const entries = getCoreMemory(projectId)
-  if (entries.length === 0) return ''
+  const cortexMd = getCortexMdContent(projectId)
+  if (entries.length === 0 && !cortexMd) return ''
 
   const sections = entries.map(e => {
     const label = e.section.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
     return `## ${label}\n${e.content}`
   })
+
+  if (cortexMd) {
+    sections.unshift(`## Project Instructions (CORTEX.md)\n${cortexMd}`)
+  }
 
   return `<core_memory>\n${sections.join('\n\n')}\n</core_memory>`
 }

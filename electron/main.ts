@@ -25,7 +25,7 @@ import {
   initSettingsTable, getProxyConfig, setProxyConfig, getProxyUrl, getProxyKey,
   getLLMConfig, setLLMConfig,
   getGitConfig, setGitConfig, testProxyConnection, getSetting, setSetting,
-  getGitHubPAT, setGitHubPAT, getAtlassianConfig,
+  getGitHubPAT, setGitHubPAT, clearServiceConfig, getAtlassianConfig,
   getQdrantConfig, setQdrantConfig, getJinaApiKey, setJinaApiKey,
   getVoyageApiKey, setVoyageApiKey, getEmbeddingProvider,
   getGitHubModelsEmbeddingEnabled, setGitHubModelsEmbeddingEnabled
@@ -38,8 +38,9 @@ import {
 } from './services/atlassian-config-service'
 import { recordFeedbackSignal, convertSignalsToTrainingPairs, getFeedbackStats } from './services/feedback-collector'
 import { getAutoScanProgress, getAutoScanConfig, setAutoScanConfig } from './services/skills/learning/autoscan-engine'
-import { initTrainingEngine, shutdownTrainingEngine, triggerManualTraining } from './services/training/training-engine'
-import { notifyPostChat, notifyChatStarted, notifyChatEnded } from './services/training/training-scheduler'
+import { initTrainingEngine, shutdownTrainingEngine, triggerManualTraining, pauseTraining, resumeTraining } from './services/training/training-engine'
+import { routeOutputToGitHub } from './services/github-output-router'
+import { notifyPostChat } from './services/training/training-scheduler'
 import { trainFromPairs, getLearnedWeightCount } from './services/learned-reranker'
 import { normalizeResponseFences } from './services/response-normalizer'
 import { initDefaultVariant } from './services/query-optimizer'
@@ -81,6 +82,7 @@ import { orchestrateImageGen } from './services/skills/builtin/image-orchestrato
 import { getComfyUIUrl, setComfyUIUrl, getComfyUIApiKey, setComfyUIApiKey, isComfyUIConfigured, testComfyUIConnection, generateImageViaComfyUI } from './services/comfyui-client'
 import { getCodeAdvisorToolDefinitions, executeCodeAdvisorTool } from './services/skills/builtin/code-advisor-tools'
 import { getPerplexityToolDefinitions, executePerplexityTool, getPerplexitySession, isPerplexityLoggedIn } from './services/skills/builtin/perplexity-tools'
+import { getAppInsightsToolDefinitions, executeAppInsightsTool } from './services/skills/builtin/appinsights-tools'
 import { enqueueMessage, getQueueStatus, getQueueLength, clearQueue } from './services/message-queue'
 import { routeTools } from './services/tool-router'
 import { classifyIntentSmart, type SmartIntentResult } from './services/skills/smart-intent-classifier'
@@ -138,6 +140,7 @@ import {
   canDelegate, isReadOnly, isBackgroundCapable, getToolWhitelist,
   createDelegationRequest, recordDelegation, getDelegationHistory
 } from './services/agents/agent-capabilities'
+import { evaluate as evaluatePermission, getPermissionMode, loadPermissionRules, addPermissionRule } from './services/permissions/permission-engine'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -192,6 +195,11 @@ app.whenReady().then(() => {
   try {
     getDb()
     initSettingsTable()
+    const corruptedPAT = getGitHubPAT()
+    if (corruptedPAT === 'true' || corruptedPAT === 'false') {
+      clearServiceConfig('github')
+      console.log('[Main] Cleared corrupted GitHub PAT value from DB')
+    }
     registerContextSource(new JiraContextSource())
     registerContextSource(new ConfluenceContextSource())
     registerContextSource(new GitHubContextSource())
@@ -646,7 +654,7 @@ app.whenReady().then(() => {
 
       try {
         console.log(`[Chat] Pipeline processing: "${query.slice(0, 100)}"`)
-        notifyChatStarted()
+        pauseTraining()
 
         // Pipeline Stage 0: Sanitize
         let stepStart = Date.now()
@@ -1029,7 +1037,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
               }, emitThinking)
               mainWindow?.webContents.send('chat:stream', { conversationId, content: normalizeResponseFences(orchResponse), done: true })
               persistAssistantResponse(conversationId, orchResponse)
-              notifyChatEnded()
+              resumeTraining()
               notifyPostChat(projectId)
               return { success: true, content: orchResponse, contextChunks: [] }
             }
@@ -1059,7 +1067,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
 
               mainWindow?.webContents.send('chat:stream', { conversationId, content: normalizeResponseFences(reactResult.content), done: true })
               persistAssistantResponse(conversationId, reactResult.content)
-              notifyChatEnded()
+              resumeTraining()
               notifyPostChat(projectId)
               return { success: true, content: reactResult.content, contextChunks: [] }
             }
@@ -1573,13 +1581,14 @@ Return ONLY the enhanced prompt, nothing else.`
         const artistTools = getArtistToolDefinitions()
         const codeAdvisorTools = getCodeAdvisorToolDefinitions()
         const perplexityTools = getPerplexityToolDefinitions()
+        const appInsightsTools = getAppInsightsToolDefinitions()
         let mcpToolDefs: Awaited<ReturnType<typeof getToolDefinitions>> = []
         try {
           mcpToolDefs = await getToolDefinitions()
         } catch (toolErr) {
           console.warn('[Chat] Failed to collect MCP tools (non-fatal):', toolErr)
         }
-         const coreTools = [...builtinTools, ...projectTools, ...visionTools, ...artistTools, ...codeAdvisorTools, ...perplexityTools]
+         const coreTools = [...builtinTools, ...projectTools, ...visionTools, ...artistTools, ...codeAdvisorTools, ...perplexityTools, ...appInsightsTools]
            .filter((tool, index, arr) => arr.findIndex(t => t.function.name === tool.function.name) === index)
         let allTools: typeof coreTools
         if (forcePerplexityMode) {
@@ -1656,12 +1665,53 @@ Return ONLY the enhanced prompt, nothing else.`
               query,
               metadata: { toolName: toolCall.function.name, toolArgs: toolCall.function.arguments }
             }).catch((err) => console.warn('[Hooks] on:tool:call failed (non-fatal):', err))
+
+            // Permission gate — runs before every tool call
+            const toolInputStr = typeof toolCall.function.arguments === 'string'
+              ? toolCall.function.arguments
+              : JSON.stringify(toolCall.function.arguments ?? {})
+            const permDecision = evaluatePermission(toolCall.function.name, toolInputStr)
+
+            if (permDecision.action === 'deny') {
+              console.log(`[Permission] DENY ${toolCall.function.name} — ${permDecision.reason}`)
+              return {
+                content: `[Permission Denied] ${toolCall.function.name} is not allowed in current mode (${getPermissionMode()}). Reason: ${permDecision.reason}`,
+                isError: true
+              }
+            }
+
+            if (permDecision.action === 'ask' && mainWindow) {
+              console.log(`[Permission] ASK ${toolCall.function.name} — showing dialog`)
+              const argsPreview = toolInputStr.length > 200 ? toolInputStr.slice(0, 200) + '…' : toolInputStr
+              const { response } = await dialog.showMessageBox(mainWindow, {
+                type: 'question',
+                title: 'Permission Required',
+                message: `Allow "${toolCall.function.name}"?`,
+                detail: argsPreview,
+                buttons: ['Deny', 'Allow Once', 'Allow Always'],
+                defaultId: 1,
+                cancelId: 0,
+              })
+              if (response === 0) {
+                console.log(`[Permission] User denied ${toolCall.function.name}`)
+                return {
+                  content: `[Permission Denied] User rejected the operation: ${toolCall.function.name}. Do not retry without explicit user instruction.`,
+                  isError: true
+                }
+              }
+              if (response === 2) {
+                addPermissionRule(toolCall.function.name, 'allow', 'user')
+                console.log(`[Permission] Permanently allowed ${toolCall.function.name}`)
+              }
+            }
+
             const isPerplexity = toolCall.function.name.startsWith('cortex_perplexity_')
             const isProjectTool = /^cortex_(git_|grep_|project_|search_config)/.test(toolCall.function.name)
             const isVisionTool = /^cortex_(analyze_image|compare_images)/.test(toolCall.function.name)
             const isArtistTool = /^cortex_(generate_image|edit_image|list_image_models)/.test(toolCall.function.name)
             const isCodeAdvisor = /^cortex_(code_advisor|find_similar_code|suggest_fix|explain_code_pattern)/.test(toolCall.function.name)
-            const isBuiltinFs = toolCall.function.name.startsWith('cortex_') && !isPerplexity && !isProjectTool && !isVisionTool && !isArtistTool && !isCodeAdvisor
+            const isAppInsights = toolCall.function.name.startsWith('cortex_appinsights_')
+            const isBuiltinFs = toolCall.function.name.startsWith('cortex_') && !isPerplexity && !isProjectTool && !isVisionTool && !isArtistTool && !isCodeAdvisor && !isAppInsights
 
             let toolResult = isPerplexity
               ? await executePerplexityTool(toolCall.function.name, toolCall.function.arguments)
@@ -1671,6 +1721,8 @@ Return ONLY the enhanced prompt, nothing else.`
               ? await executeArtistTool(toolCall.function.name, toolCall.function.arguments)
               : isCodeAdvisor
               ? await executeCodeAdvisorTool(toolCall.function.name, toolCall.function.arguments, projectId)
+              : isAppInsights
+              ? await executeAppInsightsTool(toolCall.function.name, toolCall.function.arguments)
               : isProjectTool
               ? await executeProjectTool(toolCall.function.name, toolCall.function.arguments, projectId)
               : isBuiltinFs
@@ -1885,7 +1937,7 @@ Return ONLY the enhanced prompt, nothing else.`
           // Non-fatal
         }
 
-        notifyChatEnded()
+        resumeTraining()
         notifyPostChat(projectId)
 
         return {
@@ -2492,15 +2544,6 @@ Return ONLY the enhanced prompt, nothing else.`
       repoQueries.updateStatus(db).run('error', err instanceof Error ? err.message : 'Import thất bại', repoId)
       return { success: false, error: err instanceof Error ? err.message : 'Import thất bại' }
     }
-  })
-
-  // =====================
-  // IPC: GitHub Token
-  // =====================
-  ipcMain.handle('github:getPAT', () => !!getGitHubPAT())
-  ipcMain.handle('github:setPAT', (_event, token: string) => {
-    setGitHubPAT(token)
-    return true
   })
 
   // =====================

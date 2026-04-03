@@ -4,7 +4,7 @@
 
 **The AI Brain That Knows Your Codebase**
 
-[![Version](https://img.shields.io/badge/version-4.5.0%20Hippocampus-orange.svg)](https://github.com/hoainho/cortex/releases)
+[![Version](https://img.shields.io/badge/version-5.0.0--alpha.1%20Eureka-blueviolet.svg)](https://github.com/hoainho/cortex/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://github.com/hoainho/cortex/releases)
 [![Built With](https://img.shields.io/badge/built%20with-Electron%20%2B%20React%20%2B%20TypeScript-61DAFB.svg)](#tech-stack)
