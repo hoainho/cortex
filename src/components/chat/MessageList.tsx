@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { cn } from '../../lib/utils'
 import type { Message } from '../../types'
+
+const PAGE_SIZE = 50
 
 interface MessageListProps {
   messages: Message[]
@@ -18,6 +20,20 @@ export function MessageList({ messages, onFeedback, onCopy, searchMatchIds, sear
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isUserScrolledUp = useRef(false)
   const [showScrollButton, setShowScrollButton] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+
+  const visibleMessages = useMemo(() => {
+    if (searchCurrentId && searchMatchIds && searchMatchIds.length > 0) {
+      return messages
+    }
+    return messages.slice(-visibleCount)
+  }, [messages, visibleCount, searchCurrentId, searchMatchIds])
+
+  const hasHiddenMessages = messages.length > visibleCount && !searchCurrentId
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [messages.length === 0])
 
   const scrollToBottom = useCallback(() => {
     isUserScrolledUp.current = false
@@ -36,7 +52,10 @@ export function MessageList({ messages, onFeedback, onCopy, searchMatchIds, sear
       isUserScrolledUp.current = true
       setShowScrollButton(true)
     }
-  }, [])
+    if (el.scrollTop < 200 && messages.length > visibleCount) {
+      setVisibleCount(prev => Math.min(prev + PAGE_SIZE, messages.length))
+    }
+  }, [messages.length, visibleCount])
 
   useEffect(() => {
     if (!isUserScrolledUp.current) {
@@ -59,7 +78,17 @@ export function MessageList({ messages, onFeedback, onCopy, searchMatchIds, sear
         style={{ scrollBehavior: 'smooth' }}
       >
         <div className="w-full max-w-[900px] mx-auto px-5 xl:px-6">
-          {messages.map((message) => (
+          {hasHiddenMessages && (
+            <div className="text-center py-3">
+              <button
+                onClick={() => setVisibleCount(prev => Math.min(prev + PAGE_SIZE, messages.length))}
+                className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+              >
+                ↑ Tải thêm {Math.min(PAGE_SIZE, messages.length - visibleCount)} tin nhắn cũ hơn
+              </button>
+            </div>
+          )}
+          {visibleMessages.map((message) => (
             <MessageBubble
               key={message.id}
               message={message}

@@ -141,8 +141,13 @@ let rotationModelIndex = 0
 
 let _mainWindow: BrowserWindow | null = null
 
-const authFailedModels = new Set<string>()
-const serverErrorModels = new Set<string>()
+const authFailedModels = new Map<string, number>()
+const serverErrorModels = new Map<string, number>()
+const ERROR_TTL_MS = 24 * 60 * 60 * 1000
+
+function isErrorExpired(timestamp: number): boolean {
+  return Date.now() - timestamp > ERROR_TTL_MS
+}
 
 /**
  * Get the tier for a model ID based on pattern matching
@@ -226,7 +231,9 @@ async function getCurrentModel(): Promise<string> {
 
   if (userSelectedModelId) {
     const exists = cachedModels.some(m => m.id === userSelectedModelId)
-    if (exists && !authFailedModels.has(userSelectedModelId) && !serverErrorModels.has(userSelectedModelId)) {
+    const authTime = authFailedModels.get(userSelectedModelId)
+    const svrTime = serverErrorModels.get(userSelectedModelId)
+    if (exists && (authTime === undefined || isErrorExpired(authTime)) && (svrTime === undefined || isErrorExpired(svrTime))) {
       return userSelectedModelId
     }
   }
@@ -244,8 +251,11 @@ async function getCurrentModel(): Promise<string> {
 
 function rotateToNextModel(): boolean {
   rotationModelIndex++
-  while (rotationModelIndex < cachedModels.length &&
-    (authFailedModels.has(cachedModels[rotationModelIndex].id) || serverErrorModels.has(cachedModels[rotationModelIndex].id))) {
+  while (rotationModelIndex < cachedModels.length) {
+    const id = cachedModels[rotationModelIndex].id
+    const authTime = authFailedModels.get(id)
+    const svrTime = serverErrorModels.get(id)
+    if ((authTime === undefined || isErrorExpired(authTime)) && (svrTime === undefined || isErrorExpired(svrTime))) break
     rotationModelIndex++
   }
   if (rotationModelIndex >= cachedModels.length) {
@@ -295,8 +305,10 @@ export function getAvailableModels(): Array<{ id: string; tier: number; active: 
 
 /** Derive model status from tracked error sets */
 function getModelStatus(modelId: string): ModelStatus {
-  if (authFailedModels.has(modelId)) return 'quota_exhausted'
-  if (serverErrorModels.has(modelId)) return 'unavailable'
+  const authTime = authFailedModels.get(modelId)
+  if (authTime !== undefined && !isErrorExpired(authTime)) return 'quota_exhausted'
+  const svrTime = serverErrorModels.get(modelId)
+  if (svrTime !== undefined && !isErrorExpired(svrTime)) return 'unavailable'
   return 'ready'
 }
 
@@ -376,7 +388,7 @@ export async function refreshModelsWithCheck(): Promise<Array<{ id: string; tier
 
       if (response.ok) {
         if (bodyIndicatesQuotaError(bodyText)) {
-          authFailedModels.add(model.id)
+          authFailedModels.set(model.id, Date.now())
           probeResults.push({ id: model.id, httpStatus: response.status, bodyHint: 'quota_in_body', result: 'quota_exhausted' })
         } else {
           authFailedModels.delete(model.id)
@@ -384,25 +396,25 @@ export async function refreshModelsWithCheck(): Promise<Array<{ id: string; tier
           probeResults.push({ id: model.id, httpStatus: response.status, bodyHint: '', result: 'ready' })
         }
       } else if (isAuthError(response.status)) {
-        authFailedModels.add(model.id)
+        authFailedModels.set(model.id, Date.now())
         const hint = bodyIndicatesQuotaError(bodyText) ? 'quota_confirmed' : `body:${bodyText.slice(0, 80)}`
         probeResults.push({ id: model.id, httpStatus: response.status, bodyHint: hint, result: 'quota_exhausted' })
       } else if (response.status === 429) {
-        authFailedModels.add(model.id)
+        authFailedModels.set(model.id, Date.now())
         probeResults.push({ id: model.id, httpStatus: 429, bodyHint: 'rate_limited', result: 'quota_exhausted' })
       } else if (response.status === 500 || response.status === 502 || response.status === 503) {
-        serverErrorModels.add(model.id)
+        serverErrorModels.set(model.id, Date.now())
         probeResults.push({ id: model.id, httpStatus: response.status, bodyHint: '', result: 'unavailable' })
       } else {
         if (bodyIndicatesQuotaError(bodyText)) {
-          authFailedModels.add(model.id)
+          authFailedModels.set(model.id, Date.now())
           probeResults.push({ id: model.id, httpStatus: response.status, bodyHint: 'quota_in_body', result: 'quota_exhausted' })
         } else {
           probeResults.push({ id: model.id, httpStatus: response.status, bodyHint: bodyText.slice(0, 80), result: 'ready' })
         }
       }
     } catch (err) {
-      serverErrorModels.add(model.id)
+      serverErrorModels.set(model.id, Date.now())
       probeResults.push({ id: model.id, httpStatus: 0, bodyHint: err instanceof Error ? err.message : 'timeout', result: 'unavailable' })
     }
   }))
@@ -661,10 +673,10 @@ export async function streamChatCompletion(
         const isQuotaRelated = status === 429 && bodyIndicatesQuotaError(errorBody)
 
         if (isQuotaRelated) {
-          authFailedModels.add(model)
+          authFailedModels.set(model, Date.now())
           console.warn(`[LLM] Model "${model}" quota exhausted (429 + quota body), marking as quota_exhausted`)
         } else if (status !== 429) {
-          serverErrorModels.add(model)
+          serverErrorModels.set(model, Date.now())
         }
         console.warn(`[LLM] Model "${model}" failed (${status}), rotating...`)
 
@@ -693,7 +705,7 @@ export async function streamChatCompletion(
       }
 
       if (isAuthError(status)) {
-        authFailedModels.add(model)
+        authFailedModels.set(model, Date.now())
         console.warn(`[LLM] Model "${model}" auth failed (${status}), marking as unavailable`)
 
         if (userSelectedModelId === model) {

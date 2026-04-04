@@ -4,6 +4,7 @@
  */
 
 import { initMemorySchema } from './memory-db'
+import { getDb } from '../db'
 import { getCoreMemory, getCoreMemorySection, getCoreMemoryForPrompt, updateCoreMemory, getCoreMemoryTokenCount } from './core-memory'
 import { addArchivalMemory, searchArchivalMemory, getArchivalMemories, decayRelevance, getArchivalStats } from './archival-memory'
 import { addRecallMemory, searchRecallMemory, getRecentRecall, getRecallCount } from './recall-memory'
@@ -106,6 +107,8 @@ export async function saveInteraction(
       console.error('[MemoryManager] Core distill failed:', err)
     }
   }
+
+  trimMemory(projectId)
 }
 
 export async function searchMemory(
@@ -232,6 +235,41 @@ const CORE_DISTILL_RULES: Array<{
     extract: /\b(tool|công cụ|dùng|use|plugin|extension|IDE|editor|terminal|CLI|npm|yarn|pnpm|docker|git|vscode|vim|neovim)\b/i,
   },
 ]
+
+const ARCHIVAL_MAX = 5000
+const RECALL_MAX = 2000
+
+function trimMemory(projectId: string): void {
+  try {
+    const db = getDb()
+    const archivalCount = (db.prepare('SELECT COUNT(*) as c FROM archival_memory WHERE project_id = ?').get(projectId) as { c: number }).c
+    if (archivalCount > ARCHIVAL_MAX) {
+      const excess = archivalCount - ARCHIVAL_MAX
+      db.prepare(`
+        DELETE FROM archival_memory WHERE id IN (
+          SELECT id FROM archival_memory WHERE project_id = ?
+          ORDER BY relevance_score ASC, accessed_at ASC
+          LIMIT ?
+        )
+      `).run(projectId, excess)
+      console.log(`[MemoryManager] Trimmed ${excess} archival entries for project ${projectId}`)
+    }
+    const recallCount = (db.prepare('SELECT COUNT(*) as c FROM recall_memory WHERE project_id = ?').get(projectId) as { c: number }).c
+    if (recallCount > RECALL_MAX) {
+      const excess = recallCount - RECALL_MAX
+      db.prepare(`
+        DELETE FROM recall_memory WHERE id IN (
+          SELECT id FROM recall_memory WHERE project_id = ?
+          ORDER BY timestamp ASC
+          LIMIT ?
+        )
+      `).run(projectId, excess)
+      console.log(`[MemoryManager] Trimmed ${excess} recall entries for project ${projectId}`)
+    }
+  } catch (err) {
+    console.error('[MemoryManager] Trim failed:', err)
+  }
+}
 
 function autoDistillCoreMemory(content: string): { section: CoreMemorySection; insight: string } | null {
   const sentences = splitSentences(content)

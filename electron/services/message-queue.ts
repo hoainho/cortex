@@ -14,6 +14,7 @@ type QueuedMessage = {
   reject: (reason: unknown) => void
   enqueuedAt: number
   status: 'queued' | 'processing' | 'done' | 'failed'
+  timeoutId?: ReturnType<typeof setTimeout>
 }
 
 const conversationQueues = new Map<string, QueuedMessage[]>()
@@ -47,7 +48,8 @@ async function processNext(conversationId: string): Promise<void> {
     msg.status = 'failed'
     msg.reject(err)
   } finally {
-    queue.shift()
+    const completed = queue.shift()
+    if (completed?.timeoutId !== undefined) clearTimeout(completed.timeoutId)
     processing.set(conversationId, false)
     if (queue.length > 0) {
       processNext(conversationId)
@@ -80,8 +82,7 @@ export function enqueueMessage<T>(
     queue.push(msg)
     console.log(`[MessageQueue] Enqueued ${msg.id} for conversation ${conversationId} (position: ${queue.length})`)
 
-    // Timeout guard
-    setTimeout(() => {
+    msg.timeoutId = setTimeout(() => {
       if (msg.status === 'queued') {
         const idx = queue.indexOf(msg)
         if (idx !== -1) queue.splice(idx, 1)
@@ -121,6 +122,7 @@ export function clearQueue(conversationId: string): number {
   if (!queue) return 0
   const cleared = queue.length
   for (const msg of queue) {
+    if (msg.timeoutId !== undefined) clearTimeout(msg.timeoutId)
     if (msg.status === 'queued') {
       msg.reject(new Error('Queue cleared'))
     }

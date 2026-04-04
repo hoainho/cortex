@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useMemo, memo, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -346,7 +346,15 @@ function extractTextContent(children: ReactNode): string {
   return ''
 }
 
+const IMAGE_CACHE_MAX = 100
 const imageCache = new Map<string, string>()
+
+function imageCacheSet(key: string, value: string): void {
+  if (imageCache.size >= IMAGE_CACHE_MAX) {
+    imageCache.delete(imageCache.keys().next().value!)
+  }
+  imageCache.set(key, value)
+}
 
 function CortexImageLoader({ path, alt }: { path: string; alt?: string }) {
   const [base64, setBase64] = useState<string | null>(imageCache.get(path) || null)
@@ -364,7 +372,7 @@ function CortexImageLoader({ path, alt }: { path: string; alt?: string }) {
     if (window.electronAPI?.readFileAsBase64) {
       window.electronAPI.readFileAsBase64(path).then((b64: string) => {
         if (b64) {
-          imageCache.set(path, b64)
+          imageCacheSet(path, b64)
           setBase64(b64)
         }
         setLoading(false)
@@ -700,38 +708,48 @@ function FeedbackButtons({ messageId, onFeedback }: { messageId: string; onFeedb
 const EMPTY_STEPS: { step: 'sanitize' | 'rag' | 'external_context' | 'web_search' | 'build_prompt' | 'streaming'; status: 'running' | 'done' | 'skipped' | 'error'; label: string; detail?: string; durationMs?: number }[] = []
 
 function StreamingContent({ conversationId }: { conversationId: string }) {
-  const [displayContent, setDisplayContent] = useState('')
   const rafRef = useRef<number | null>(null)
   const pendingRef = useRef<string>('')
 
-  useEffect(() => {
-    const unsub = useChatStore.subscribe((state) => {
-      const conv = state.conversations.find((c) => c.id === conversationId)
-      const lastMsg = conv?.messages[conv.messages.length - 1]
-      const raw = lastMsg?.content ?? ''
-      const cleaned = raw
-        .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
-        .replace(/!\[.*?\]\(cortex-image:\/\/[^)]+\)/g, '🎨 Generating image...')
-        .replace(/\[CORTEX_IMG:[^\]]+\]/g, '🎨 Image generated!')
-        .replace(/CORTEX_IMAGE_PATH:[^\n]+/g, '')
-        .trim()
-      pendingRef.current = cleaned || (raw.includes('tool_call') || raw.includes('CORTEX_IMG') ? '🎨 Generating image...' : '')
+  const rawContent = useChatStore((state) => {
+    const conv = state.conversations.find((c) => c.id === conversationId)
+    const lastMsg = conv?.messages[conv.messages.length - 1]
+    return lastMsg?.content ?? ''
+  })
 
-      if (rafRef.current === null) {
-        rafRef.current = requestAnimationFrame(() => {
-          setDisplayContent(pendingRef.current)
-          rafRef.current = null
-        })
-      }
-    })
+  const [displayContent, setDisplayContent] = useState(() => {
+    const cleaned = rawContent
+      .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+      .replace(/!\[.*?\]\(cortex-image:\/\/[^)]+\)/g, '🎨 Generating image...')
+      .replace(/\[CORTEX_IMG:[^\]]+\]/g, '🎨 Image generated!')
+      .replace(/CORTEX_IMAGE_PATH:[^\n]+/g, '')
+      .trim()
+    return cleaned || (rawContent.includes('tool_call') || rawContent.includes('CORTEX_IMG') ? '🎨 Generating image...' : '')
+  })
+
+  useEffect(() => {
+    const cleaned = rawContent
+      .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+      .replace(/!\[.*?\]\(cortex-image:\/\/[^)]+\)/g, '🎨 Generating image...')
+      .replace(/\[CORTEX_IMG:[^\]]+\]/g, '🎨 Image generated!')
+      .replace(/CORTEX_IMAGE_PATH:[^\n]+/g, '')
+      .trim()
+    pendingRef.current = cleaned || (rawContent.includes('tool_call') || rawContent.includes('CORTEX_IMG') ? '🎨 Generating image...' : '')
+
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(() => {
+        setDisplayContent(pendingRef.current)
+        rafRef.current = null
+      })
+    }
+
     return () => {
-      unsub()
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
       }
     }
-  }, [conversationId])
+  }, [rawContent])
 
   return (
     <div
@@ -836,7 +854,7 @@ const MemoizedMarkdown = ({ content, searchQuery }: { content: string; searchQue
   return rendered
 }
 
-export function MessageBubble({ message, onFeedback, onCopy, isSearchMatch, isSearchCurrent, searchQuery }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, onFeedback, onCopy, isSearchMatch, isSearchCurrent, searchQuery }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isStreamingEmpty = message.isStreaming && !message.content
   const thinkingSteps = useChatStore((s) => s.thinkingSteps.get(message.conversationId)) ?? EMPTY_STEPS
@@ -936,4 +954,4 @@ export function MessageBubble({ message, onFeedback, onCopy, isSearchMatch, isSe
       </div>
     </div>
   )
-}
+})

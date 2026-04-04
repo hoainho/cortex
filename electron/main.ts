@@ -232,7 +232,7 @@ app.whenReady().then(() => {
     if (stale.length > 0) {
       console.warn(`[Background] Detected ${stale.length} stale task(s), removed from queue`)
     }
-    cleanupCompleted(300_000)
+    cleanupCompleted()
   }, 60_000)
 
   registerDefaultHooks()
@@ -2341,7 +2341,10 @@ Return ONLY the enhanced prompt, nothing else.`
           clearInterval(cookieCheckInterval)
           if (!authWin.isDestroyed()) authWin.close()
           finish({ success: true })
-        } catch {}
+        } catch {
+          clearInterval(cookieCheckInterval)
+          finish({ success: false, error: 'Cookie check failed' })
+        }
       }, 2000)
 
       authWin.on('closed', () => {

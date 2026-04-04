@@ -188,7 +188,7 @@ export function updateProgress(taskId: string, progress: number): void {
   emit({ type: 'task:progress', task: { ...task }, progress: task.progress })
 }
 
-export function cleanupCompleted(olderThanMs: number = 300_000): number {
+export function cleanupCompleted(olderThanMs: number = 30_000): number {
   const cutoff = Date.now() - olderThanMs
   let removed = 0
   for (const [id, task] of tasks) {

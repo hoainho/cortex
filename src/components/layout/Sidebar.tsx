@@ -62,7 +62,7 @@ function groupConversationsByTime(conversations: Array<{ id: string; title: stri
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar, mode, setMode, openNewProjectModal, toggleSettings } = useUIStore()
   const { projects, activeProjectId, setActiveProject, removeProject, activeBranch } = useProjectStore()
-  const { conversations, activeConversationId, setActiveConversation, createConversation, deleteConversation, renameConversation, pinConversation, isLoadingConversations } = useChatStore()
+  const { conversations, activeConversationId, setActiveConversation, loadMessagesForConversation, createConversation, deleteConversation, renameConversation, pinConversation, isLoadingConversations } = useChatStore()
 
   const activeProject = projects.find((p) => p.id === activeProjectId)
   const projectConversations = activeProjectId
@@ -390,7 +390,10 @@ export function Sidebar() {
                       <div
                         key={conv.id}
                         onClick={() => {
-                          if (editingConvId !== conv.id) setActiveConversation(conv.id)
+                          if (editingConvId !== conv.id) {
+                            setActiveConversation(conv.id)
+                            loadMessagesForConversation(conv.id)
+                          }
                         }}
                         onDoubleClick={() => startRename(conv.id, conv.title)}
                         onMouseEnter={() => setHoveredConv(conv.id)}

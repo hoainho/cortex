@@ -92,6 +92,10 @@ export function notifyChatEnded(): void {
   chatActive = false
 }
 
+export function isChatActive(): boolean {
+  return config.pauseDuringChat && chatActive
+}
+
 export function isUserIdle(): boolean {
   try {
     const idleSeconds = powerMonitor.getSystemIdleTime()
@@ -112,6 +116,15 @@ export function getSchedulerStatus(): {
     chatActive,
     idle: isUserIdle(),
     eventCounters: Object.fromEntries(eventCounters)
+  }
+}
+
+export function cleanupProjectCounters(projectId: string): void {
+  for (const key of eventCounters.keys()) {
+    if (key.endsWith(`:${projectId}`)) eventCounters.delete(key)
+  }
+  for (const key of lastTriggerTime.keys()) {
+    if (key.endsWith(`:${projectId}`)) lastTriggerTime.delete(key)
   }
 }
 

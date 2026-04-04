@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef } from 'react'
+import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
 import { useProjectStore } from '../../stores/projectStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -43,7 +43,7 @@ function QueuePill({ count, onClear }: { count: number; onClear: () => void }) {
 
 export function ChatArea() {
   const { activeProjectId, projects, activeBranch } = useProjectStore()
-  const { conversations, activeConversationId, addMessage, createConversation, loadConversations, setMessageStreaming } = useChatStore()
+  const { conversations, activeConversationId, addMessage, createConversation, loadConversations, loadMessagesForConversation, setMessageStreaming } = useChatStore()
   const { mode, setArchitectureOpen, setDashboardOpen, setMemoryOpen, setSkillsOpen, setLearningOpen, setAgentOpen, setTrainingIntelligenceOpen } = useUIStore()
   const syncState = useSyncStore()
   const { isSyncing, hasFileChanges, lastSyncAt } = syncState
@@ -239,13 +239,15 @@ export function ChatArea() {
     }
   }, [])
 
-  const sortedModels = [...availableModels].sort((a, b) => {
+  const sortedModels = useMemo(() => {
     const statusOrder: Record<string, number> = { ready: 0, quota_exhausted: 1, unavailable: 2 }
-    const orderA = statusOrder[a.status] ?? 1
-    const orderB = statusOrder[b.status] ?? 1
-    if (orderA !== orderB) return orderA - orderB
-    return b.tier - a.tier
-  })
+    return [...availableModels].sort((a, b) => {
+      const orderA = statusOrder[a.status] ?? 1
+      const orderB = statusOrder[b.status] ?? 1
+      if (orderA !== orderB) return orderA - orderB
+      return b.tier - a.tier
+    })
+  }, [availableModels])
 
   // Load repo info + auto-start file watcher when project changes
   useEffect(() => {

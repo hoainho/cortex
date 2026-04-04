@@ -16,6 +16,7 @@ interface ChatState {
   thinkingSteps: Map<string, StoredThinkingStep[]>
 
   loadConversations: (projectId: string) => Promise<void>
+  loadMessagesForConversation: (conversationId: string) => Promise<void>
   setActiveConversation: (id: string | null) => void
   getProjectConversations: (projectId: string) => Conversation[]
   createConversation: (projectId: string, mode: ResponseMode, branch?: string) => Promise<string | null>
@@ -67,22 +68,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isLoadingConversations: true })
     try {
       const convRows = await window.electronAPI.getConversationsByProject(projectId)
-      const conversations: Conversation[] = []
-
-      for (const row of convRows) {
-        let messages: Message[] = []
-        if (window.electronAPI.getMessagesByConversation) {
-          const msgRows = await window.electronAPI.getMessagesByConversation(row.id)
-          messages = msgRows.map(mapDbMessage).filter((m: Message) => m.content !== '')
-        }
-        conversations.push(mapDbConversation(row, messages))
-      }
-
+      const conversations: Conversation[] = convRows.map((row: any) => mapDbConversation(row, []))
       set({ conversations })
     } catch (err) {
       console.error('Failed to load conversations:', err)
     } finally {
       set({ isLoadingConversations: false })
+    }
+  },
+
+  loadMessagesForConversation: async (conversationId: string) => {
+    if (!window.electronAPI?.getMessagesByConversation) return
+    const existing = get().conversations.find(c => c.id === conversationId)
+    if (!existing || existing.messages.length > 0) return
+    try {
+      const msgRows = await window.electronAPI.getMessagesByConversation(conversationId)
+      const messages = msgRows.map(mapDbMessage).filter((m: Message) => m.content !== '')
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === conversationId ? { ...c, messages } : c
+        )
+      }))
+    } catch (err) {
+      console.error('Failed to load messages:', err)
     }
   },
 
