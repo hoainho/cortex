@@ -8,7 +8,7 @@ import { createAutoscanPipeline } from './pipelines/pipeline-autoscan'
 import { DEFAULT_SCHEDULER_CONFIG, ALL_PIPELINES } from './types'
 import { getCircuitStatus, RateLimitError } from '../skills/learning/autoscan-engine'
 import { initTrainingSchema, insertRun, startRun, completeRun, getLastRunTime, recordMetric, getRunCountByPipeline } from './training-db'
-import { startScheduler, stopScheduler, notifyPostChat, notifyEvent, notifyChatStarted, notifyChatEnded, getSchedulerStatus } from './training-scheduler'
+import { startScheduler, stopScheduler, notifyPostChat, notifyEvent, notifyChatStarted, notifyChatEnded, getSchedulerStatus, isChatActive } from './training-scheduler'
 
 const AUTOSCAN_NORMAL_INTERVAL_MS = 5_000
 const CIRCUIT_OPEN_RETRY_MS = 31 * 60 * 1000
@@ -20,6 +20,7 @@ let processing = false
 const pipelineRegistry: Map<PipelineName, TrainingPipeline> = new Map()
 const jobQueue: TrainingJob[] = []
 let currentJob: TrainingJob | null = null
+let currentJobAbort: AbortController | null = null
 
 export function initTrainingEngine(window: BrowserWindow | null): void {
   if (engineRunning) return
@@ -119,11 +120,31 @@ export function notifyBehavioralEvent(projectId: string): void {
 
 export function pauseTraining(): void {
   notifyChatStarted()
+  if (currentJobAbort) {
+    currentJobAbort.abort()
+    console.log('[TrainingEngine] Interrupted current job for chat')
+  }
 }
 
 export function resumeTraining(): void {
   notifyChatEnded()
   scheduleProcessing()
+}
+
+export function setPipelineEnabled(pipelineName: PipelineName, enabled: boolean): void {
+  const pipeline = pipelineRegistry.get(pipelineName)
+  if (!pipeline) return
+  pipeline.enabled = enabled
+  if (!enabled) {
+    const before = jobQueue.length
+    jobQueue.splice(0, jobQueue.length, ...jobQueue.filter(j => j.pipeline !== pipelineName))
+    const cleared = before - jobQueue.length
+    if (cleared > 0) console.log(`[TrainingEngine] Cleared ${cleared} queued job(s) for disabled pipeline '${pipelineName}'`)
+    if (currentJob?.pipeline === pipelineName && currentJobAbort) {
+      currentJobAbort.abort()
+      console.log(`[TrainingEngine] Pipeline '${pipelineName}' disabled — interrupted current job`)
+    }
+  }
 }
 
 export function triggerManualTraining(pipelineName?: PipelineName, projectId?: string): void {
@@ -157,12 +178,18 @@ async function processQueue(): Promise<void> {
       if (!job) break
 
       const pipeline = pipelineRegistry.get(job.pipeline)
-      if (!pipeline) {
+      if (!pipeline || !pipeline.enabled) {
         job.status = 'skipped'
         continue
       }
 
+      if (isChatActive()) {
+        jobQueue.unshift(job)
+        break
+      }
+
       currentJob = job
+      currentJobAbort = new AbortController()
       job.status = 'running'
       job.startedAt = Date.now()
 
@@ -174,7 +201,8 @@ async function processQueue(): Promise<void> {
         projectId: job.projectId,
         trigger: job.trigger,
         lastRunAt: getLastRunTime(job.pipeline),
-        eventsSinceLastRun: 0
+        eventsSinceLastRun: 0,
+        abortSignal: currentJobAbort.signal
       }
 
       let result: PipelineResult
@@ -211,6 +239,7 @@ async function processQueue(): Promise<void> {
 
       emitProgress(job.pipeline, result.success ? 'completed' : 'failed', result)
       currentJob = null
+      currentJobAbort = null
 
       if (job.pipeline === 'autoscan' && result.success && engineRunning) {
         const circuit = getCircuitStatus()

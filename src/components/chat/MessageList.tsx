@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, memo } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { cn } from '../../lib/utils'
@@ -15,7 +15,7 @@ interface MessageListProps {
   searchQuery?: string
 }
 
-export function MessageList({ messages, onFeedback, onCopy, searchMatchIds, searchCurrentId, searchQuery }: MessageListProps) {
+export const MessageList = memo(function MessageList({ messages, onFeedback, onCopy, searchMatchIds, searchCurrentId, searchQuery }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isUserScrolledUp = useRef(false)
@@ -121,4 +121,4 @@ export function MessageList({ messages, onFeedback, onCopy, searchMatchIds, sear
       </button>
     </div>
   )
-}
+})

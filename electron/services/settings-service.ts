@@ -194,6 +194,36 @@ export function clearAtlassianConfig(): void {
   db.prepare("DELETE FROM settings WHERE key IN ('atlassian_site_url', 'atlassian_email', 'atlassian_api_token')").run()
 }
 
+export function getAppInsightsConfig(): { appId: string; authMethod: string; apiKey?: string; tenantId?: string; clientId?: string; clientSecret?: string; timespan?: string } | null {
+  const config = getServiceConfig('appinsights')
+  if (!config?.app_id) return null
+  return {
+    appId: config.app_id,
+    authMethod: config.auth_method || 'azurecli',
+    apiKey: config.api_key,
+    tenantId: config.tenant_id,
+    clientId: config.client_id,
+    clientSecret: config.client_secret,
+    timespan: config.timespan || 'PT24H',
+  }
+}
+
+export function setAppInsightsConfig(config: { appId: string; authMethod: string; apiKey?: string; tenantId?: string; clientId?: string; clientSecret?: string; timespan?: string }): void {
+  setServiceConfig('appinsights', {
+    app_id: config.appId,
+    auth_method: config.authMethod,
+    ...(config.apiKey ? { api_key: config.apiKey } : {}),
+    ...(config.tenantId ? { tenant_id: config.tenantId } : {}),
+    ...(config.clientId ? { client_id: config.clientId } : {}),
+    ...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+    ...(config.timespan ? { timespan: config.timespan } : {}),
+  }, ['api_key', 'client_secret'])
+}
+
+export function clearAppInsightsConfig(): void {
+  clearServiceConfig('appinsights')
+}
+
 // ============================
 // Generic Service Credentials Store
 // ============================
@@ -245,6 +275,35 @@ export function getGitHubPAT(): string | null {
 
 export function setGitHubPAT(token: string): void {
   setServiceConfig('github', { token }, ['token'])
+}
+
+export function resolveGitHubToken(projectId?: string): string | undefined {
+  const db = getDb()
+  if (projectId) {
+    try {
+      const rows = db.prepare(
+        "SELECT env FROM mcp_servers WHERE env IS NOT NULL AND enabled = 1 AND (name LIKE ? OR name LIKE ?)"
+      ).all(`%${projectId}%`, `%GitHub%`) as Array<{ env: string }>
+      for (const row of rows) {
+        const env = JSON.parse(row.env) as Record<string, string>
+        const t = env.GITHUB_PERSONAL_ACCESS_TOKEN || env.GITHUB_TOKEN || env.GH_TOKEN
+        if (t && t !== 'true' && t !== 'false') return t
+      }
+    } catch {}
+  }
+  const globalPAT = getGitHubPAT()
+  if (globalPAT && globalPAT !== 'true' && globalPAT !== 'false') return globalPAT
+  try {
+    const rows = db.prepare(
+      "SELECT env FROM mcp_servers WHERE LOWER(name) LIKE '%github%' AND env IS NOT NULL AND enabled = 1"
+    ).all() as Array<{ env: string }>
+    for (const row of rows) {
+      const env = JSON.parse(row.env) as Record<string, string>
+      const t = env.GITHUB_PERSONAL_ACCESS_TOKEN || env.GITHUB_TOKEN || env.GH_TOKEN
+      if (t && t !== 'true' && t !== 'false') return t
+    }
+  } catch {}
+  return undefined
 }
 
 // ============================

@@ -25,6 +25,7 @@ import type { MCPToolDefinition } from '../mcp/mcp-manager'
 import { getDb, repoQueries } from '../../db'
 import { convertDocument, isDocumentFile } from '../../document-converter'
 import { checkAbsolutePathAccess, getAccessMode, isProtectedPath } from '../../path-access-policy'
+import { getRepoLocalPathIfExists, getRepoDisplayName } from '../../repo-path-resolver'
 
 // =====================
 // Tool Definitions
@@ -392,11 +393,27 @@ function getRepoPaths(projectId: string): string[] {
     source_path: string
     source_type: string
   }>
-  const paths = repos
-    .map(r => r.source_path)
-    .filter(p => p && existsSync(p))
+
+  const paths: string[] = []
+  const missingRepoNames: string[] = []
+
+  for (const repo of repos) {
+    if (repo.source_type === 'jira' || repo.source_type === 'confluence') continue
+    const localPath = getRepoLocalPathIfExists(repo)
+    if (localPath) {
+      paths.push(localPath)
+    } else if (repo.source_type === 'github') {
+      missingRepoNames.push(getRepoDisplayName(repo))
+    }
+  }
 
   if (paths.length === 0) {
+    if (missingRepoNames.length > 0) {
+      throw new Error(
+        `Repository ${missingRepoNames.map(n => `'${n}'`).join(', ')} ${missingRepoNames.length === 1 ? 'is' : 'are'} not available locally. ` +
+        `Open the Brain dashboard and click Sync to restore ${missingRepoNames.length === 1 ? 'it' : 'them'}.`
+      )
+    }
     throw new Error('No accessible repositories found for this project')
   }
 

@@ -85,3 +85,14 @@ export function sanitizePrompt(input: string): { sanitized: string; suspicious: 
     threats
   }
 }
+
+export function sanitizeGitHubContent(content: string): string {
+  if (!content) return ''
+  return content
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/[\u200B-\u200D\uFEFF\u00AD\u200C]/g, '')
+    .replace(/\s(?:on\w+)="[^"]*"/gi, '')
+    .replace(/\s(?:data-\w+)="[^"]*"/gi, '')
+    .replace(/\n{5,}/g, '\n\n')
+    .trim()
+}

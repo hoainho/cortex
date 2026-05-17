@@ -113,6 +113,7 @@ const MODEL_RANKING: Array<{ pattern: string; tier: number }> = [
   // Tier 4: Fast/cheap
   { pattern: 'gemini-2.5-flash', tier: 4 },
   { pattern: 'gpt-oss', tier: 4 },
+  { pattern: 'ollama', tier: 4 },
 
   // Tier 3: Lite
   { pattern: 'gemini-2.5-flash-lite', tier: 3 },
@@ -819,6 +820,9 @@ async function _streamWithModel(
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
+  let lastEmitTime = 0
+  const STREAM_THROTTLE_MS = 50
+  let buffer = '' // Buffer for incomplete lines across chunks
 
   try {
     while (true) {
@@ -826,11 +830,18 @@ async function _streamWithModel(
       if (done) break
 
       const chunk = decoder.decode(value, { stream: true })
-      const lines = chunk.split('\n').filter((line) => line.startsWith('data: '))
-
+      buffer += chunk
+      
+      // Split by newlines, keep last incomplete line in buffer
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || '' // Keep incomplete line for next iteration
+      
       for (const line of lines) {
-        const data = line.slice(6)
-        if (data === '[DONE]') break
+        // Support both "data: " and "data:" formats
+        if (!line.startsWith('data:')) continue
+        
+        const data = line.replace(/^data:?\s*/, '').trim()
+        if (data === '[DONE]' || !data) break
 
         try {
           const parsed = JSON.parse(data)
@@ -858,11 +869,15 @@ async function _streamWithModel(
 
           if (delta.content) {
             fullContent += delta.content
-            window?.webContents.send('chat:stream', {
-              conversationId,
-              content: fullContent,
-              done: false
-            })
+            const now = Date.now()
+            if (now - lastEmitTime >= STREAM_THROTTLE_MS) {
+              window?.webContents.send('chat:stream', {
+                conversationId,
+                content: fullContent,
+                done: false
+              })
+              lastEmitTime = now
+            }
           }
 
           if (delta.tool_calls) {

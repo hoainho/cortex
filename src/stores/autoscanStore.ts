@@ -43,6 +43,7 @@ interface AutoScanState {
   triggerManual: (projectId: string) => Promise<void>
   startPolling: () => void
   stopPolling: () => void
+  updateAutoScanEnabled: (enabled: boolean) => Promise<void>
 }
 
 export const useAutoscanStore = create<AutoScanState>((set, get) => ({
@@ -88,6 +89,22 @@ export const useAutoscanStore = create<AutoScanState>((set, get) => ({
       console.error('[AutoscanStore] Failed to trigger manual scan:', err)
     } finally {
       set({ loading: false })
+    }
+  },
+
+  updateAutoScanEnabled: async (enabled: boolean) => {
+    try {
+      const projectId = window.electronAPI?.getCurrentProjectId?.()
+      if (!projectId) {
+        console.error('[AutoscanStore] No project selected')
+        return
+      }
+      
+      await window.electronAPI?.project?.setAutoScanEnabled(projectId, enabled)
+      
+      set({ config: { ...get().config, enabled } })
+    } catch (err) {
+      console.error('[AutoscanStore] Failed to update AutoScan enabled state:', err)
     }
   },
 

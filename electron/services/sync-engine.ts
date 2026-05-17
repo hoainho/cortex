@@ -16,10 +16,11 @@ import { BrowserWindow } from 'electron'
 import { watch, type FSWatcher } from 'fs'
 import { join, relative } from 'path'
 import { readFile, stat } from 'fs/promises'
-import { getDb, repoQueries, chunkQueries } from './db'
+import { getDb, repoQueries, chunkQueries, hashContent } from './db'
 import { chunkCode } from './code-chunker'
 import { readFileContent, scanDirectory, getDirectoryTree } from './file-scanner'
 import { pullLatest, getChangedFiles, getLatestSha, switchBranch, getCurrentBranch, listBranches, getGitHubToken, getBranchDiffFiles } from './git-service'
+import { resolveGitHubToken } from './settings-service'
 import { embedProjectChunks } from './embedder'
 import { invalidateCacheForProject } from './skills/efficiency/semantic-cache'
 import { rebuildGraphForFiles } from './skills/rag/graph-builder'
@@ -55,8 +56,7 @@ export async function syncGithubRepo(
 
   sendProgress('Đang pull changes từ GitHub...')
 
-  // Get stored token
-  const token = getGitHubToken(repoId) || undefined
+  const token = resolveGitHubToken(projectId) || getGitHubToken(repoId) || undefined
 
   // Pull latest
   const localPath = join(
@@ -121,23 +121,24 @@ export async function syncGithubRepo(
 
       for (const chunk of chunks) {
         insertChunk.run(
-          chunk.id,
-          chunk.projectId,
-          chunk.repoId,
-          chunk.filePath,
-          chunk.relativePath,
-          chunk.language,
-          chunk.chunkType,
-          chunk.name,
-          chunk.content,
-          chunk.lineStart,
-          chunk.lineEnd,
-          chunk.tokenEstimate,
-          JSON.stringify(chunk.dependencies),
-          JSON.stringify(chunk.exports),
-          JSON.stringify(chunk.metadata),
-          chunk.branch
-        )
+                  chunk.id,
+                  chunk.projectId,
+                  chunk.repoId,
+                  chunk.filePath,
+                  chunk.relativePath,
+                  chunk.language,
+                  chunk.chunkType,
+                  chunk.name,
+                  chunk.content,
+                  chunk.lineStart,
+                  chunk.lineEnd,
+                  chunk.tokenEstimate,
+                  JSON.stringify(chunk.dependencies),
+                  JSON.stringify(chunk.exports),
+                  JSON.stringify(chunk.metadata),
+                  chunk.branch,
+                  hashContent(chunk.content)
+                )
         chunksAdded++
       }
     } catch (err) {
@@ -281,23 +282,24 @@ export async function syncLocalRepo(
 
       for (const chunk of chunks) {
         insertChunk.run(
-          chunk.id,
-          chunk.projectId,
-          chunk.repoId,
-          chunk.filePath,
-          chunk.relativePath,
-          chunk.language,
-          chunk.chunkType,
-          chunk.name,
-          chunk.content,
-          chunk.lineStart,
-          chunk.lineEnd,
-          chunk.tokenEstimate,
-          JSON.stringify(chunk.dependencies),
-          JSON.stringify(chunk.exports),
-          JSON.stringify(chunk.metadata),
-          chunk.branch
-        )
+                  chunk.id,
+                  chunk.projectId,
+                  chunk.repoId,
+                  chunk.filePath,
+                  chunk.relativePath,
+                  chunk.language,
+                  chunk.chunkType,
+                  chunk.name,
+                  chunk.content,
+                  chunk.lineStart,
+                  chunk.lineEnd,
+                  chunk.tokenEstimate,
+                  JSON.stringify(chunk.dependencies),
+                  JSON.stringify(chunk.exports),
+                  JSON.stringify(chunk.metadata),
+                  chunk.branch,
+                  hashContent(chunk.content)
+                )
         chunksAdded++
       }
     } catch (err) {
@@ -525,23 +527,24 @@ export async function indexBranch(
 
             for (const chunk of chunks) {
               insertChunk.run(
-                chunk.id,
-                chunk.projectId,
-                chunk.repoId,
-                chunk.filePath,
-                chunk.relativePath,
-                chunk.language,
-                chunk.chunkType,
-                chunk.name,
-                chunk.content,
-                chunk.lineStart,
-                chunk.lineEnd,
-                chunk.tokenEstimate,
-                JSON.stringify(chunk.dependencies),
-                JSON.stringify(chunk.exports),
-                JSON.stringify(chunk.metadata),
-                chunk.branch
-              )
+                        chunk.id,
+                        chunk.projectId,
+                        chunk.repoId,
+                        chunk.filePath,
+                        chunk.relativePath,
+                        chunk.language,
+                        chunk.chunkType,
+                        chunk.name,
+                        chunk.content,
+                        chunk.lineStart,
+                        chunk.lineEnd,
+                        chunk.tokenEstimate,
+                        JSON.stringify(chunk.dependencies),
+                        JSON.stringify(chunk.exports),
+                        JSON.stringify(chunk.metadata),
+                        chunk.branch,
+                        hashContent(chunk.content)
+                      )
               chunksAdded++
             }
           } catch (err) {
@@ -571,23 +574,24 @@ export async function indexBranch(
 
           for (const chunk of chunks) {
             insertChunk.run(
-              chunk.id,
-              chunk.projectId,
-              chunk.repoId,
-              chunk.filePath,
-              chunk.relativePath,
-              chunk.language,
-              chunk.chunkType,
-              chunk.name,
-              chunk.content,
-              chunk.lineStart,
-              chunk.lineEnd,
-              chunk.tokenEstimate,
-              JSON.stringify(chunk.dependencies),
-              JSON.stringify(chunk.exports),
-              JSON.stringify(chunk.metadata),
-              chunk.branch
-            )
+                      chunk.id,
+                      chunk.projectId,
+                      chunk.repoId,
+                      chunk.filePath,
+                      chunk.relativePath,
+                      chunk.language,
+                      chunk.chunkType,
+                      chunk.name,
+                      chunk.content,
+                      chunk.lineStart,
+                      chunk.lineEnd,
+                      chunk.tokenEstimate,
+                      JSON.stringify(chunk.dependencies),
+                      JSON.stringify(chunk.exports),
+                      JSON.stringify(chunk.metadata),
+                      chunk.branch,
+                      hashContent(chunk.content)
+                    )
             chunksAdded++
           }
         } catch (err) {

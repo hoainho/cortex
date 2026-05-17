@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
+  appVersion: process.env.npm_package_version ?? require('../../package.json').version,
 
   // System dialogs
   openFolderDialog: () => ipcRenderer.invoke('dialog:openFolder'),
@@ -26,6 +27,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('project:setAutoScanEnabled', projectId, enabled),
   getProjectAutoScanEnabled: (projectId: string) =>
     ipcRenderer.invoke('project:getAutoScanEnabled', projectId),
+  setProjectAutoTrainEnabled: (projectId: string, enabled: boolean) =>
+    ipcRenderer.invoke('project:setAutoTrainEnabled', projectId, enabled),
+  getProjectAutoTrainEnabled: (projectId: string) =>
+    ipcRenderer.invoke('project:getAutoTrainEnabled', projectId),
   getProjectStats: (projectId: string) =>
     ipcRenderer.invoke('project:stats', projectId),
 
@@ -52,6 +57,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Conversation CRUD
   createConversation: (projectId: string, title: string, mode: string, branch?: string) =>
     ipcRenderer.invoke('conversation:create', projectId, title, mode, branch),
+  forkConversation: (opts: {
+    projectId: string; parentConversationId: string; sourceMessageId: string;
+    branchType: 'continuation' | 'standalone'; title: string; mode: string; copyMessages: boolean
+  }) => ipcRenderer.invoke('conversation:fork', opts),
+  getConversationBranches: (conversationId: string) =>
+    ipcRenderer.invoke('conversation:getBranches', conversationId),
   getConversationsByProject: (projectId: string) =>
     ipcRenderer.invoke('conversation:getByProject', projectId),
   updateConversationTitle: (conversationId: string, title: string) =>
@@ -197,6 +208,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setPerplexityCookies: (cookies: string) => ipcRenderer.invoke('settings:setPerplexityCookies', cookies),
   loginPerplexity: () => ipcRenderer.invoke('settings:loginPerplexity'),
   testPerplexity: () => ipcRenderer.invoke('settings:testPerplexity'),
+
+  slackGetCredentials: (projectId: string) => ipcRenderer.invoke('slack:getCredentials', projectId) as Promise<{ connected: boolean; workspace: string | null }>,
+  slackLogin: (projectId: string) => ipcRenderer.invoke('slack:login', projectId) as Promise<{ success: boolean; workspace?: string; error?: string }>,
+  slackDisconnect: (projectId: string) => ipcRenderer.invoke('slack:disconnect', projectId) as Promise<boolean>,
+  slackInjectIntoMCP: (projectId: string) => ipcRenderer.invoke('slack:injectIntoMCP', projectId) as Promise<{ success: boolean; error?: string }>,
+
   getGitConfig: () => ipcRenderer.invoke('settings:getGitConfig'),
   setGitConfig: (cloneDepth: number) => ipcRenderer.invoke('settings:setGitConfig', cloneDepth),
   testProxyConnection: (url: string, key: string) =>
@@ -393,6 +410,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mcpInstallPreset: (presetId: string, envValues: Record<string, string>) =>
     ipcRenderer.invoke('mcp:installPreset', presetId, envValues),
 
+  // Azure Application Insights
+  appInsightsGetConfig: () => ipcRenderer.invoke('appinsights:getConfig'),
+  appInsightsSetConfig: (config: { appId: string; authMethod: string; apiKey?: string; tenantId?: string; clientId?: string; clientSecret?: string; timespan?: string }) =>
+    ipcRenderer.invoke('appinsights:setConfig', config),
+  appInsightsClearConfig: () => ipcRenderer.invoke('appinsights:clearConfig'),
+  appInsightsCheckAzCli: () => ipcRenderer.invoke('appinsights:checkAzCli') as Promise<{ installed: boolean }>,
+  appInsightsLogin: () => ipcRenderer.invoke('appinsights:login') as Promise<{ success: boolean; error?: string }>,
+  appInsightsTest: () => ipcRenderer.invoke('appinsights:test') as Promise<{ success: boolean; error?: string; latencyMs?: number }>,
+  appInsightsStatus: () => ipcRenderer.invoke('appinsights:status') as Promise<{ connected: boolean; expiresAt: number; authMethod: string; error?: string }>,
+  appInsightsRefreshToken: () => ipcRenderer.invoke('appinsights:refreshToken') as Promise<{ success: boolean; error?: string }>,
+
   // V3: Hook System
   hooksList: () => ipcRenderer.invoke('hooks:list'),
   hooksEnable: (hookId: string) => ipcRenderer.invoke('hooks:enable', hookId),
@@ -483,4 +511,60 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('queue:status'),
   clearQueue: (conversationId: string) =>
     ipcRenderer.invoke('queue:clear', conversationId),
+
+  // Auto Backup
+  backupList: () =>
+    ipcRenderer.invoke('backup:list'),
+  backupRunNow: () =>
+    ipcRenderer.invoke('backup:run-now'),
+  backupLastTime: () =>
+    ipcRenderer.invoke('backup:last-time'),
+
+  // Bundle Export/Import
+  bundleChooseExportPath: () =>
+    ipcRenderer.invoke('bundle:choose-export-path'),
+  bundleChooseImportPath: () =>
+    ipcRenderer.invoke('bundle:choose-import-path'),
+  bundlePreview: (bundlePath: string, password: string) =>
+    ipcRenderer.invoke('bundle:preview', bundlePath, password),
+  bundleExport: (outputPath: string, password: string) =>
+    ipcRenderer.invoke('bundle:export', outputPath, password),
+  bundleImport: (bundlePath: string, password: string, pathMappings?: Array<{ oldPath: string; newPath: string }>) =>
+    ipcRenderer.invoke('bundle:import', bundlePath, password, pathMappings),
+  onBundleExportProgress: (handler: (event: unknown, data: { pct: number; msg: string }) => void) =>
+    ipcRenderer.on('bundle:export-progress', handler),
+  offBundleExportProgress: (handler: (event: unknown, data: { pct: number; msg: string }) => void) =>
+    ipcRenderer.off('bundle:export-progress', handler),
+  onBundleImportProgress: (handler: (event: unknown, data: { pct: number; msg: string }) => void) =>
+    ipcRenderer.on('bundle:import-progress', handler),
+  offBundleImportProgress: (handler: (event: unknown, data: { pct: number; msg: string }) => void) =>
+    ipcRenderer.off('bundle:import-progress', handler),
+
+  // Scheduler
+  schedulerList: () =>
+    ipcRenderer.invoke('scheduler:list'),
+  schedulerLogsList: () =>
+    ipcRenderer.invoke('scheduler:logs:list'),
+  schedulerLogsRead: (filePath: string) =>
+    ipcRenderer.invoke('scheduler:logs:read', filePath),
+  schedulerHistory: (taskName?: string) =>
+    ipcRenderer.invoke('scheduler:history', taskName),
+  schedulerTrigger: (name: string) =>
+    ipcRenderer.invoke('scheduler:trigger', name),
+  schedulerEnable: (name: string) =>
+    ipcRenderer.invoke('scheduler:enable', name),
+  schedulerDisable: (name: string) =>
+    ipcRenderer.invoke('scheduler:disable', name),
+  schedulerUnregister: (name: string) =>
+    ipcRenderer.invoke('scheduler:unregister', name),
+  schedulerRegister: (task: {
+    name: string; cron: string; agent: string; prompt: string;
+    enabled: boolean; projectId?: string; maxBudget?: number
+  }) => ipcRenderer.invoke('scheduler:register', task),
+
+  // App control
+  appRestart: () =>
+    ipcRenderer.invoke('app:restart'),
+  dialogOpenFolder: () =>
+    ipcRenderer.invoke('dialog:openFolder'),
 })

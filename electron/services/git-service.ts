@@ -173,20 +173,41 @@ export async function pullLatest(
   localPath: string,
   token?: string
 ): Promise<{ newSha: string; changed: boolean }> {
+  if (!existsSync(localPath)) {
+    throw new Error(`Local clone not found at ${localPath} — please re-import the repository`)
+  }
   const oldSha = await getLatestSha(localPath)
+  const env = { ...process.env, ...GIT_ENV }
 
-  await execFileAsync('git', [...buildAuthArgs(token), 'pull', '--ff-only'], {
-    cwd: localPath,
-    timeout: 60000,
-    env: { ...process.env, ...GIT_ENV }
-  })
+  console.log(`[Git] pullLatest: fetching remote (oldSha=${oldSha.slice(0, 7)})`)
+
+  try {
+    await withAuthRemote(localPath, token, () =>
+      execFileAsync('git', [...NO_CREDENTIAL_HELPER, 'fetch', '--prune', 'origin'], { cwd: localPath, timeout: 30000, env }).then(() => undefined)
+    )
+  } catch (fetchErr: any) {
+    const stderr: string = fetchErr.stderr || fetchErr.message || ''
+    const isTokenError = stderr.includes('Invalid username or token') ||
+      stderr.includes('Authentication failed') ||
+      stderr.includes('could not read Username') ||
+      stderr.includes('repository not found')
+    console.warn(`[Git] fetch failed: ${stderr.split('\n')[0]}`)
+    throw new Error(isTokenError
+      ? 'GitHub token không hợp lệ hoặc đã hết hạn — vui lòng cập nhật token trong Settings'
+      : `Không thể fetch từ GitHub: ${stderr.split('\n')[0]}`)
+  }
+
+  try {
+    await execFileAsync('git', [...NO_CREDENTIAL_HELPER, 'merge', '--ff-only', 'FETCH_HEAD'], { cwd: localPath, timeout: 60000, env })
+  } catch (mergeErr: any) {
+    console.warn(`[Git] merge --ff-only failed: ${mergeErr.stderr?.split('\n')[0] || mergeErr.message}`)
+    throw new Error(`Pull thất bại: ${mergeErr.stderr?.split('\n')[0] || mergeErr.message}`)
+  }
 
   const newSha = await getLatestSha(localPath)
+  console.log(`[Git] pullLatest: done (newSha=${newSha.slice(0, 7)}, changed=${oldSha !== newSha})`)
 
-  return {
-    newSha,
-    changed: oldSha !== newSha
-  }
+  return { newSha, changed: oldSha !== newSha }
 }
 
 async function getRemoteUrl(localPath: string): Promise<string | null> {
@@ -369,22 +390,73 @@ export function deleteGitHubToken(tokenId: string): void {
   db.prepare('DELETE FROM github_tokens WHERE id = ?').run(tokenId)
 }
 
-function buildAuthArgs(token?: string): string[] {
-  if (!token) return []
-  return [
-    '-c', 'credential.helper=',
-    '-c', `url.https://x-access-token:${token}@github.com/.insteadOf=https://github.com/`
-  ]
+export function updateAllGitHubTokens(token: string): void {
+  const db = getDb()
+  const encrypted = safeStorage.isEncryptionAvailable()
+    ? safeStorage.encryptString(token).toString('base64')
+    : Buffer.from(token).toString('base64')
+  const rows = db.prepare('SELECT id FROM github_tokens').all() as Array<{ id: string }>
+  const update = db.prepare('UPDATE github_tokens SET token_encrypted = ? WHERE id = ?')
+  db.transaction(() => {
+    for (const row of rows) update.run(encrypted, row.id)
+  })()
+  console.log(`[Git] updateAllGitHubTokens: updated ${rows.length} repo tokens`)
 }
 
-const GIT_ENV: Record<string, string> = { GIT_TERMINAL_PROMPT: '0' }
+const GIT_ENV: Record<string, string> = { GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo', GCM_INTERACTIVE: 'never' }
+const NO_CREDENTIAL_HELPER = ['-c', 'credential.helper=']
+
+function injectTokenIntoUrl(remoteUrl: string, token: string): string | null {
+  const sshMatch = remoteUrl.match(/^git@github\.com[:/]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/)
+  if (sshMatch) {
+    return `https://x-access-token:${token}@github.com/${sshMatch[1]}/${sshMatch[2]}.git`
+  }
+  try {
+    const u = new URL(remoteUrl)
+    if (u.hostname === 'github.com' || u.hostname.endsWith('.github.com')) {
+      u.username = 'x-access-token'
+      u.password = token
+      return u.toString()
+    }
+  } catch {}
+  return null
+}
+
+async function withAuthRemote<T>(
+  localPath: string,
+  token: string | undefined,
+  fn: () => Promise<T>
+): Promise<T> {
+  if (!token) return fn()
+  const originalUrl = await getRemoteUrl(localPath)
+  if (!originalUrl) return fn()
+  const authedUrl = injectTokenIntoUrl(originalUrl, token)
+  if (!authedUrl) {
+    console.warn(`[Git] withAuthRemote: cannot inject token into URL "${originalUrl.slice(0, 40)}"`)
+    return fn()
+  }
+  console.log(`[Git] withAuthRemote: setting auth URL (originalUrl=${originalUrl.replace(/https?:\/\/[^@]*@/, 'https://***@').slice(0, 60)})`)
+  try {
+    await execFileAsync('git', ['remote', 'set-url', 'origin', authedUrl], { cwd: localPath })
+    return await fn()
+  } finally {
+    try {
+      await execFileAsync('git', ['remote', 'set-url', 'origin', originalUrl], { cwd: localPath })
+      console.log(`[Git] withAuthRemote: restored original URL`)
+    } catch (restoreErr) {
+      console.error(`[Git] CRITICAL: failed to restore remote URL`, restoreErr)
+    }
+  }
+}
 
 async function gitFetchWithAuth(localPath: string, token?: string): Promise<void> {
-  await execFileAsync('git', [...buildAuthArgs(token), 'fetch', '--all', '--prune'], {
-    cwd: localPath,
-    timeout: 30000,
-    env: { ...process.env, ...GIT_ENV }
-  })
+  await withAuthRemote(localPath, token, () =>
+    execFileAsync('git', [...NO_CREDENTIAL_HELPER, 'fetch', '--all', '--prune'], {
+      cwd: localPath,
+      timeout: 30000,
+      env: { ...process.env, ...GIT_ENV }
+    }).then(() => undefined)
+  )
 }
 
 // ==================
@@ -457,17 +529,18 @@ export async function switchBranch(
   branch: string,
   token?: string
 ): Promise<{ sha: string }> {
-  const authArgs = buildAuthArgs(token)
   const env = { ...process.env, ...GIT_ENV }
 
   try {
-    await execFileAsync('git', [...authArgs, 'checkout', branch], { cwd: localPath, timeout: 30000, env })
+    await execFileAsync('git', ['checkout', branch], { cwd: localPath, timeout: 30000, env })
   } catch {
-    await execFileAsync('git', [...authArgs, 'checkout', '-b', branch, `origin/${branch}`], { cwd: localPath, timeout: 30000, env })
+    await execFileAsync('git', ['checkout', '-b', branch, `origin/${branch}`], { cwd: localPath, timeout: 30000, env })
   }
 
   try {
-    await execFileAsync('git', [...authArgs, 'pull', '--ff-only'], { cwd: localPath, timeout: 60000, env })
+    await withAuthRemote(localPath, token, () =>
+      execFileAsync('git', [...NO_CREDENTIAL_HELPER, 'pull', '--ff-only'], { cwd: localPath, timeout: 60000, env }).then(() => undefined)
+    )
   } catch { /* non-fatal: may be up to date */ }
 
   const sha = await getLatestSha(localPath)

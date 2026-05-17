@@ -10,6 +10,7 @@ import { execFile } from 'child_process'
 import { existsSync } from 'fs'
 import type { MCPToolDefinition } from '../mcp/mcp-manager'
 import { getDb, repoQueries } from '../../db'
+import { getRepoLocalPathIfExists, getRepoDisplayName } from '../../repo-path-resolver'
 
 const GIT_TIMEOUT = 15000
 
@@ -35,12 +36,21 @@ function getRepoPaths(projectId: string): Array<{ path: string; name: string }> 
   const repos = repoQueries.getByProject(db).all(projectId) as Array<{
     id: string; source_path: string; source_type: string
   }>
-  return repos
-    .filter(r => r.source_path && existsSync(r.source_path))
-    .map(r => ({
-      path: r.source_path,
-      name: r.source_path.split('/').pop() || r.source_path
-    }))
+
+  const result: Array<{ path: string; name: string }> = []
+  const missingRepoNames: string[] = []
+
+  for (const repo of repos) {
+    if (repo.source_type === 'jira' || repo.source_type === 'confluence') continue
+    const localPath = getRepoLocalPathIfExists(repo)
+    if (localPath) {
+      result.push({ path: localPath, name: getRepoDisplayName(repo) })
+    } else if (repo.source_type === 'github') {
+      missingRepoNames.push(getRepoDisplayName(repo))
+    }
+  }
+
+  return result
 }
 
 const TOOL_DEFINITIONS: MCPToolDefinition[] = [
@@ -168,6 +178,16 @@ export async function executeProjectTool(
 
   const repos = getRepoPaths(projectId)
   if (repos.length === 0) {
+    const db = getDb()
+    const allRepos = repoQueries.getByProject(db).all(projectId) as Array<{ source_type: string; source_path: string }>
+    const githubRepos = allRepos.filter(r => r.source_type === 'github')
+    if (githubRepos.length > 0) {
+      const names = githubRepos.map(r => `'${r.source_path.split('/').filter(Boolean).pop()}'`).join(', ')
+      return {
+        content: `Repository ${names} ${githubRepos.length === 1 ? 'is' : 'are'} not available locally. Open the Brain dashboard and click Sync to restore ${githubRepos.length === 1 ? 'it' : 'them'}.`,
+        isError: true
+      }
+    }
     return { content: 'No accessible repositories found for this project', isError: true }
   }
 

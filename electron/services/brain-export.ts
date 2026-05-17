@@ -7,7 +7,7 @@
 
 import { writeFile, readFile } from 'fs/promises'
 import { gzipSync, gunzipSync } from 'zlib'
-import { getDb, projectQueries } from './db'
+import { getDb, projectQueries, hashContent } from './db'
 import { randomUUID } from 'crypto'
 import { embedProjectChunks } from './embedder'
 
@@ -119,8 +119,8 @@ export async function importBrain(inputPath: string): Promise<{ projectId: strin
   ).run(repoId, projectId, 'local', 'imported', 'main', 'ready')
 
   const insertChunk = db.prepare(`
-    INSERT INTO chunks (id, project_id, repo_id, file_path, relative_path, language, chunk_type, name, content, line_start, line_end, token_estimate, dependencies, exports, metadata)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO chunks (id, project_id, repo_id, file_path, relative_path, language, chunk_type, name, content, line_start, line_end, token_estimate, dependencies, exports, metadata, content_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const insertMany = db.transaction((chunks: any[]) => {
@@ -140,7 +140,8 @@ export async function importBrain(inputPath: string): Promise<{ projectId: strin
         chunk.token_estimate,
         chunk.dependencies,
         chunk.exports,
-        chunk.metadata
+        chunk.metadata,
+        hashContent(chunk.content ?? '')
       )
     }
   })

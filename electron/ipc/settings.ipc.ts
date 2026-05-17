@@ -17,7 +17,8 @@ import { getComfyUIUrl, setComfyUIUrl, getComfyUIApiKey, setComfyUIApiKey, testC
 import { getHuggingFaceToken, setHuggingFaceToken } from '../services/skills/builtin/artist-tools'
 import { getOpenRouterApiKey, setOpenRouterApiKey, getOpenRouterEnabled, setOpenRouterEnabled, getFreeModels, testOpenRouterConnection } from '../services/skills/efficiency/openrouter-fallback'
 import { getPerplexitySession, isPerplexityLoggedIn, executePerplexityTool } from '../services/skills/builtin/perplexity-tools'
-import { getGitHubPAT, setGitHubPAT } from '../services/settings-service'
+import { getGitHubPAT, setGitHubPAT, clearServiceConfig } from '../services/settings-service'
+import { updateAllGitHubTokens } from '../services/git-service'
 import { getAccessMode, setAccessMode, getPathAllowlist, addToAllowlist, removeFromAllowlist } from '../services/path-access-policy'
 
 export function registerSettingsIPC(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | null): void {
@@ -194,6 +195,22 @@ export function registerSettingsIPC(ipcMain: IpcMain, getMainWindow: () => Brows
   })
   ipcMain.handle('fs-policy:removeFromAllowlist', (_event, path: string) => {
     removeFromAllowlist(path)
+    return true
+  })
+
+  ipcMain.handle('github:getPAT', () => {
+    const token = getGitHubPAT()
+    if (!token || token === 'true' || token === 'false') return ''
+    return token
+  })
+  ipcMain.handle('github:setPAT', (_event, token: string) => {
+    setGitHubPAT(token)
+    updateAllGitHubTokens(token)
+    console.log(`[GitHub] PAT updated, synced to all per-repo tokens`)
+    return true
+  })
+  ipcMain.handle('github:clearAllTokens', () => {
+    clearServiceConfig('github')
     return true
   })
 }

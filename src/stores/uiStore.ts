@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { ResponseMode } from '../types'
+import { useAutoscanStore } from './autoscanStore'
 
 interface UIState {
   sidebarCollapsed: boolean
@@ -17,6 +18,7 @@ interface UIState {
   costOpen: boolean
   agentOpen: boolean
   trainingIntelligenceOpen: boolean
+  autoScanEnabled: boolean
 
   toggleSidebar: () => void
   setMode: (mode: ResponseMode) => void
@@ -34,6 +36,7 @@ interface UIState {
   setCostOpen: (open: boolean) => void
   setAgentOpen: (open: boolean) => void
   setTrainingIntelligenceOpen: (open: boolean) => void
+  toggleAutoScan: () => void
 }
 
 // Load persisted theme from localStorage
@@ -45,13 +48,11 @@ const getInitialTheme = (): 'light' | 'dark' => {
   return 'dark'
 }
 
-// Apply theme to document
 function applyTheme(theme: 'light' | 'dark') {
   document.documentElement.setAttribute('data-theme', theme)
   localStorage.setItem('cortex-theme', theme)
 }
 
-// Apply initial theme immediately
 const initialTheme = getInitialTheme()
 applyTheme(initialTheme)
 
@@ -71,6 +72,7 @@ export const useUIStore = create<UIState>((set) => ({
   costOpen: false,
   agentOpen: false,
   trainingIntelligenceOpen: false,
+  autoScanEnabled: true,
 
   toggleSidebar: () =>
     set((state) => ({
@@ -104,5 +106,28 @@ export const useUIStore = create<UIState>((set) => ({
   setLearningOpen: (open) => set({ learningOpen: open }),
   setCostOpen: (open) => set({ costOpen: open }),
   setAgentOpen: (open) => set({ agentOpen: open }),
-  setTrainingIntelligenceOpen: (open) => set({ trainingIntelligenceOpen: open })
+  setTrainingIntelligenceOpen: (open) => set({ trainingIntelligenceOpen: open }),
+
+  toggleAutoScan: () => {
+    set((state) => ({ autoScanEnabled: !state.autoScanEnabled }));
+    useAutoscanStore.getState().updateAutoScanEnabled(!useUIStore.getState().autoScanEnabled);
+  }
 }))
+
+setTimeout(() => {
+  const loadAutoScanState = async () => {
+    try {
+      const projectId = window.electronAPI?.getCurrentProjectId?.()
+      if (!projectId) return
+      
+      const enabled = await window.electronAPI?.project?.getAutoScanEnabled(projectId)
+      if (enabled !== undefined) {
+        useUIStore.getState().autoScanEnabled = enabled
+      }
+    } catch (err) {
+      console.error('[UIStore] Failed to load AutoScan enabled state:', err)
+    }
+  }
+  
+  loadAutoScanState()
+}, 100)

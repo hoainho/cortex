@@ -15,7 +15,8 @@ export interface Project {
   brainStatus: BrainStatus
   lastSyncAt: number | null
   createdAt: number
-  autoScanEnabled: boolean // per-project AutoScan/AutoTraining toggle
+  autoScanEnabled: boolean
+  autoTrainEnabled: boolean
 }
 
 export interface ChatAttachment {
@@ -46,6 +47,9 @@ export interface Conversation {
   title: string
   mode: ResponseMode
   branch: string
+  branchType?: 'main' | 'continuation' | 'standalone'
+  sourceMessageId?: string | null
+  parentConversationId?: string | null
   pinned: boolean
   messages: Message[]
   createdAt: number
@@ -53,12 +57,13 @@ export interface Conversation {
 
 export interface IndexingProgress {
   repoId: string
-  phase: 'scanning' | 'parsing' | 'chunking' | 'embedding' | 'done' | 'error'
+  phase: 'scanning' | 'parsing' | 'chunking' | 'embedding' | 'done' | 'error' | 'cloning' | 'complete'
   totalFiles: number
   processedFiles: number
   totalChunks: number
   currentFile?: string
   error?: string
+  needsToken?: boolean
 }
 export interface SyncProgress {
   repoId: string
@@ -340,6 +345,8 @@ declare global {
       renameProject: (projectId: string, newName: string) => Promise<boolean>
       setProjectAutoScanEnabled: (projectId: string, enabled: boolean) => Promise<boolean>
       getProjectAutoScanEnabled: (projectId: string) => Promise<boolean>
+      setProjectAutoTrainEnabled: (projectId: string, enabled: boolean) => Promise<boolean>
+      getProjectAutoTrainEnabled: (projectId: string) => Promise<boolean>
       getProjectStats: (projectId: string) => Promise<any>
 
       // Repository import
@@ -351,12 +358,16 @@ declare global {
       importOrgRepos: (projectId: string, repos: Array<{ name: string; fullName: string; htmlUrl: string; cloneUrl: string; language: string | null; isPrivate: boolean; description: string | null; defaultBranch: string }>, token: string) => Promise<Array<{ name: string; repoId: string; status: string; error?: string }>>
       onOrgImportProgress: (callback: (data: { projectId: string; current: number; total: number; repoName: string; phase: string }) => void) => () => void
       deleteRepo: (repoId: string) => Promise<{ success: boolean; error?: string }>
+      checkCloneHealth: (repoId: string) => Promise<{ cloneExists: boolean; isCorrupt: boolean }>
+      reclone: (projectId: string, repoId: string) => Promise<{ success: boolean; error?: string; needsToken?: boolean }>
 
       // Brain search
       searchBrain: (projectId: string, query: string, limit?: number) => Promise<any[]>
 
       // Conversation CRUD
       createConversation: (projectId: string, title: string, mode: string, branch?: string) => Promise<any>
+      forkConversation: (opts: { projectId: string; parentConversationId: string; sourceMessageId: string; branchType: 'continuation' | 'standalone'; title: string; mode: string; copyMessages: boolean }) => Promise<any>
+      getConversationBranches: (conversationId: string) => Promise<any[]>
       getConversationsByProject: (projectId: string) => Promise<any[]>
       updateConversationTitle: (conversationId: string, title: string) => Promise<boolean>
       deleteConversation: (conversationId: string) => Promise<boolean>
@@ -458,6 +469,21 @@ declare global {
       setPerplexityCookies: (cookies: string) => Promise<boolean>
       loginPerplexity: () => Promise<{ success: boolean; error?: string }>
       testPerplexity: () => Promise<{ success: boolean; latencyMs?: number; preview?: string; error?: string }>
+
+      slackGetCredentials: (projectId: string) => Promise<{ connected: boolean; workspace: string | null }>
+      slackLogin: (projectId: string) => Promise<{ success: boolean; workspace?: string; error?: string }>
+      slackDisconnect: (projectId: string) => Promise<boolean>
+      slackInjectIntoMCP: (projectId: string) => Promise<{ success: boolean; error?: string }>
+
+      appInsightsGetConfig: () => Promise<{ appId: string; authMethod: string; apiKey?: string; tenantId?: string; clientId?: string; clientSecret?: string; timespan?: string } | null>
+      appInsightsSetConfig: (config: { appId: string; authMethod: string; apiKey?: string; tenantId?: string; clientId?: string; clientSecret?: string; timespan?: string }) => Promise<{ success: boolean }>
+      appInsightsClearConfig: () => Promise<{ success: boolean }>
+      appInsightsCheckAzCli: () => Promise<{ installed: boolean }>
+      appInsightsLogin: () => Promise<{ success: boolean; error?: string }>
+      appInsightsTest: () => Promise<{ success: boolean; error?: string; latencyMs?: number }>
+      appInsightsStatus: () => Promise<{ connected: boolean; expiresAt: number; authMethod: string; error?: string }>
+      appInsightsRefreshToken: () => Promise<{ success: boolean; error?: string }>
+
       getGitConfig: () => Promise<{ cloneDepth: number }>
       setGitConfig: (cloneDepth: number) => Promise<boolean>
       testProxyConnection: (url: string, key: string) => Promise<{ success: boolean; error?: string; latencyMs?: number }>
@@ -470,7 +496,7 @@ declare global {
       isOnboardingCompleted: () => Promise<boolean>
 
       // GitHub
-      getGitHubPAT: () => Promise<boolean>
+      getGitHubPAT: () => Promise<string>
       setGitHubPAT: (token: string) => Promise<boolean>
 
       // Jira (per-project)
@@ -631,6 +657,38 @@ declare global {
 
        getQueueStatus: () => Promise<Array<{ conversationId: string; queueLength: number; isProcessing: boolean }>>
        clearQueue: (conversationId: string) => Promise<number>
+
+       schedulerList: () => Promise<Array<{ name: string; cron: string; agent: string; prompt: string; enabled: boolean; projectId?: string; maxBudget?: number; lastRunAt?: number; nextRunAt?: number }>>
+       schedulerLogsList: () => Promise<Array<{ file: string; date: string; sizeBytes: number }>>
+       schedulerLogsRead: (filePath: string) => Promise<string>
+       schedulerHistory: (taskName?: string) => Promise<Array<{ taskName: string; startedAt: number; finishedAt: number; success: boolean; cost?: number; summary?: string; error?: string }>>
+       schedulerTrigger: (name: string) => Promise<boolean>
+       schedulerEnable: (name: string) => Promise<boolean>
+       schedulerDisable: (name: string) => Promise<boolean>
+       schedulerUnregister: (name: string) => Promise<boolean>
+       schedulerRegister: (task: { name: string; cron: string; agent: string; prompt: string; enabled: boolean; projectId?: string; maxBudget?: number }) => Promise<boolean>
+
+       backupList: () => Promise<Array<{ filename: string; date: string; sizeBytes: number; path: string; createdAt: number }>>
+       backupRunNow: () => Promise<{ success: boolean; path?: string; sizeBytes?: number; error?: string }>
+       backupLastTime: () => Promise<number | null>
+
+       bundleChooseExportPath: () => Promise<string | null>
+       bundleChooseImportPath: () => Promise<string | null>
+       bundlePreview: (bundlePath: string, password: string) => Promise<{
+         valid: boolean
+         manifest: { version: string; cortexVersion: string; platform: string; createdAt: number; hasSecrets: boolean }
+         metadata: { projects: Array<{ id: string; name: string; sourcePaths: string[] }>; totalConversations: number; totalMessages: number }
+         passwordCorrect: boolean
+         pathsNeedingRemap: string[]
+       }>
+       bundleExport: (outputPath: string, password: string) => Promise<{ success: boolean; outputPath?: string; sizeBytes?: number; error?: string }>
+       bundleImport: (bundlePath: string, password: string, pathMappings?: Array<{ oldPath: string; newPath: string }>) => Promise<{ success: boolean; pathsNeedingRemap: string[]; requiresRestart: boolean; error?: string }>
+       onBundleExportProgress: (handler: (event: unknown, data: { pct: number; msg: string }) => void) => void
+       offBundleExportProgress: (handler: (event: unknown, data: { pct: number; msg: string }) => void) => void
+       onBundleImportProgress: (handler: (event: unknown, data: { pct: number; msg: string }) => void) => void
+       offBundleImportProgress: (handler: (event: unknown, data: { pct: number; msg: string }) => void) => void
+
+       appRestart: () => Promise<void>
     }
   }
 }

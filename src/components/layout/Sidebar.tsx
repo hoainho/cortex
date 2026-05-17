@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import {
   Brain,
   Plus,
@@ -62,11 +62,13 @@ function groupConversationsByTime(conversations: Array<{ id: string; title: stri
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar, mode, setMode, openNewProjectModal, toggleSettings } = useUIStore()
   const { projects, activeProjectId, setActiveProject, removeProject, activeBranch } = useProjectStore()
-  const { conversations, activeConversationId, setActiveConversation, loadMessagesForConversation, createConversation, deleteConversation, renameConversation, pinConversation, isLoadingConversations } = useChatStore()
+  const { conversations: conversationMeta, activeConversationId, isLoadingConversations,
+    setActiveConversation, loadMessagesForConversation, createConversation,
+    deleteConversation, renameConversation, pinConversation } = useChatStore()
 
   const activeProject = projects.find((p) => p.id === activeProjectId)
   const projectConversations = activeProjectId
-    ? conversations.filter((c) => c.projectId === activeProjectId)
+    ? conversationMeta.filter((c) => c.projectId === activeProjectId)
     : []
 
   const [convSearch, setConvSearch] = useState('')

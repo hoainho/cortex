@@ -5,6 +5,64 @@ All notable changes to Cortex are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.0.0] "Eureka" - 2026-05-17
+
+> **Eureka** — the moment of breakthrough discovery. v5.0 transforms Cortex from a brain-only assistant into a full-fledged developer companion: it can now be extended, scheduled, backed up, and integrated with the tools you already use. Inspired by Claude Code's extensibility model.
+
+### Added
+
+#### Extensibility Layer (Eureka core)
+- **MCP server** (`mcp-server/`) — Cortex can now act as an MCP server that other tools (Claude Desktop, OpenCode, etc.) can connect to, exposing the local brain + skills as MCP tools.
+- **Artifact viewer** (`src/components/chat/ArtifactViewer.tsx`) — Render React components / HTML / SVG previews inline in chat, with sandboxed runtime in `public/preview-runtime/` (React + Babel pinned versions).
+- **Fork button** (`src/components/chat/ForkButton.tsx`) — Fork any message in a conversation into a new branch for parallel exploration.
+- **Error boundary** (`src/components/ui/ErrorBoundary.tsx`) — Graceful crash recovery for the renderer with auto-reload option.
+
+#### Scheduler & Background Jobs
+- **`electron/services/scheduler/`** — Cron-style scheduled tasks: embedding-freshness checks, sync jobs, autoscan retries. New `freshness-logger.ts` writes structured logs to SQLite.
+- **`ScheduledTasksPanel.tsx`** — UI panel to view, pause, resume, and trigger scheduled jobs manually.
+- **`scheduler.ipc.ts`** — IPC bridge for renderer ↔ scheduler.
+
+#### Backup & Restore
+- **`electron/services/backup/`** — One-click backup of brain state (SQLite + Qdrant + settings) to `.tar.gz`. Restore from any backup file.
+- **`BackupRestorePanel.tsx`** — Settings UI for backup management.
+- **`backup.ipc.ts`** — IPC handlers for backup/restore lifecycle.
+
+#### Integrations
+- **Slack** (`slack.ipc.ts`) — Connect a Slack workspace; Cortex agents can read channels and send messages.
+- **Application Insights** (`appinsights.ipc.ts` + `skills/builtin/appinsights-tools.ts`) — Query Azure Application Insights for telemetry/logs from within chat.
+- **Software bundle import** (`bundle.ipc.ts`) — Import / export complete project bundles (code + brain + settings) for sharing.
+- **GitHub output router** (`electron/services/github-output-router.ts`) — Smart routing of agent output to GitHub PR comments / issue threads.
+
+#### Chat & UI Overhaul
+- **Chat store refactor** — `chatStore.ts` (1100+ lines) split into modular files under `src/stores/chat/` for maintainability.
+- **TrainingIntelligencePanel** — Globally mounted in MainLayout for cross-project training visibility.
+- **MessageBubble** improvements — Better fork affordance, artifact embedding, error recovery.
+- **ThinkingProcess** redesign — Streaming reasoning view with collapsible steps.
+
+#### Build & Distribution
+- **`dist:win`** + **`dist:all`** scripts in `package.json` — Build Windows installer and multi-platform releases.
+
+### Changed
+
+- **`smart-intent-classifier`** — More accurate intent detection (chat vs. code-edit vs. search vs. plan).
+- **`mcp-manager`** — Cleaner lifecycle management for MCP server connections; auto-reconnect on disconnect.
+- **`embedder`** — Throttle improvements; per-provider rate limit awareness.
+- **`training-engine`** — Pipeline-autoscan: deeper Socratic question generation, structured chunk metadata.
+- **`settings-service`** — Expanded credential store for Slack, AppInsights, scheduler-specific configs.
+- **`llm-client`** — Performance: reduced re-renders for long-running chat sessions; surrogate sanitization for Anthropic backends.
+
+### Fixed
+
+- **Memory leaks** in long-running chat sessions (eliminated re-render storms; commit `b8e51ca`).
+- **Lone surrogate** crashes in LLM context when scraped content contains broken emoji pairs (commit `81df31e`).
+- **Chat formatting** — Response normalization, fenced-code rendering, message-block headers (commit `817ff32`).
+
+### Notes
+
+- 4 commits already on `main` between v4.5.0 "Hippocampus" and this release.
+- 73 files of feature work consolidated into the v5.0.0 release commit.
+- Backup format is forward-compatible — backups from v5.0.0 will restore in future v5.x.
+
 ## [4.2.0] "Synapse" - 2026-03-25
 
 > **Synapse** — the junction between neurons where signals are transmitted. This release connects Cortex to a broader universe of information: documents, structured data, and the accumulated wisdom of the world's best AI systems.

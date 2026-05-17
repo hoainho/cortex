@@ -78,6 +78,14 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
       let batchIndex = Math.floor(offset / scanConfig.batchSize)
 
       while (offset < totalChunks) {
+        if (context.abortSignal?.aborted) {
+          console.log(`[AutoScan] Aborted — saved offset=${offset}`)
+          break
+        }
+        if (!getAutoScanConfig().enabled) {
+          console.log(`[AutoScan] Disabled mid-run — stopping at offset=${offset}`)
+          break
+        }
         if (getCircuitStatus().state === 'open') {
           console.log(`[AutoScan] Circuit breaker OPEN — dừng toàn bộ scan job (project=${projectId}, saved offset=${offset})`)
           break
@@ -185,7 +193,7 @@ export function createAutoscanPipeline(): TrainingPipeline {
     name: 'autoscan',
     priority: 2,
     triggers: ['interval', 'idle', 'manual'],
-    enabled: true,
+    enabled: getAutoScanConfig().enabled,
     execute
   }
 }

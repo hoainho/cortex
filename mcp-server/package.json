@@ -1,0 +1,42 @@
+{
+  "name": "@cortex/mcp-server",
+  "version": "0.1.0",
+  "description": "Cortex Brain -- MCP Server exposing codebase intelligence, memory, and RAG",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "cortex-brain": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/cli.ts",
+    "start": "node dist/cli.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "better-sqlite3": "^12.6.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "cortex",
+    "mcp",
+    "ai",
+    "codebase",
+    "rag",
+    "memory"
+  ],
+  "license": "MIT"
+}

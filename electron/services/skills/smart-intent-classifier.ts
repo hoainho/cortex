@@ -12,6 +12,7 @@
 
 import type { SkillCategory } from './types'
 import { getProxyUrl, getProxyKey } from '../settings-service'
+import { getAvailableModels, fetchAvailableModels } from '../llm-client'
 
 // =====================
 // Types
@@ -61,14 +62,27 @@ const CLASSIFIER_PROMPT = `Classify this query. Return JSON:
 
 Query: `
 
-/** Fast model for classification — cheap and quick */
-const CLASSIFIER_MODEL = 'gemini-2.5-flash-lite'
-const CLASSIFIER_TIMEOUT = 5000
+const CLASSIFIER_TIMEOUT = 20000  // 20 seconds - increased from 8s to handle slow proxies
 
 export async function classifyIntentSmart(query: string): Promise<SmartIntentResult> {
   try {
     const proxyUrl = getProxyUrl()
     const proxyKey = getProxyKey()
+
+    let availableModels = getAvailableModels()
+    if (availableModels.length === 0) {
+      await fetchAvailableModels()
+      availableModels = getAvailableModels()
+    }
+    
+    const fastModel = availableModels
+      .filter(m => m.status === 'ready' && m.tier <= 5)
+      .sort((a, b) => a.tier - b.tier)[0]
+    
+    if (!fastModel) {
+      console.warn('[SmartClassifier] No fast model available, falling back to keywords')
+      return classifyIntentKeywordFallback(query)
+    }
 
     const response = await fetch(`${proxyUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -77,7 +91,7 @@ export async function classifyIntentSmart(query: string): Promise<SmartIntentRes
         Authorization: `Bearer ${proxyKey}`
       },
       body: JSON.stringify({
-        model: CLASSIFIER_MODEL,
+        model: fastModel.id,
         messages: [
           { role: 'system', content: CLASSIFIER_SYSTEM },
           { role: 'user', content: CLASSIFIER_PROMPT + query.slice(0, 500) }

@@ -13,6 +13,9 @@ import { registerAppInsightsIPC } from './appinsights.ipc'
 import { registerSlackIPC } from './slack.ipc'
 import { registerCortexMdIPC } from './cortex-md.ipc'
 import { registerAgentsIPC } from './agents.ipc'
+import { registerBackupIPC } from './backup.ipc'
+import { registerBundleIPC } from './bundle.ipc'
+import { registerSchedulerIPC } from './scheduler.ipc'
 
 export function registerAllIPC(
   ipcMain: IpcMain,
@@ -33,4 +36,7 @@ export function registerAllIPC(
   registerSlackIPC(ipcMain, getMainWindow)
   registerCortexMdIPC(ipcMain)
   registerAgentsIPC(ipcMain)
+  registerBackupIPC(ipcMain)
+  registerBundleIPC(ipcMain, getMainWindow)
+  registerSchedulerIPC(ipcMain, getMainWindow)
 }

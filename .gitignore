@@ -12,3 +12,13 @@ cortex-data/
 .sisyphus/
 ai/
 AGENTS.md
+
+# Build cache
+*.tsbuildinfo
+
+# Stray shell-expansion folder
+/~/
+
+# Unrelated TDD drafts (project-external)
+reward-delivery-tdd.md
+win-streak-tdd.md

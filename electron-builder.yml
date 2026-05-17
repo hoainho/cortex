@@ -17,7 +17,7 @@ files:
 mac:
   icon: build/icon.png
   target:
-    - dmg
+    # - dmg
     - zip
   category: public.app-category.developer-tools
   entitlementsInherit: build/entitlements.mac.plist

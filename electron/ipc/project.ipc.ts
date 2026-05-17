@@ -9,6 +9,8 @@ import { cloneRepository, checkRepoAccess, storeGitHubToken, getGitHubToken, get
 import type { OrgRepo } from '../services/git-service'
 import { initNanoBrain } from '../services/nano-brain-service'
 import { syncEnabledFromDb } from '../services/skills/learning/autoscan-engine'
+import { resolveGitHubToken } from '../services/settings-service'
+import { getRepoLocalPath } from '../services/repo-path-resolver'
 
 export function registerProjectIPC(ipcMain: IpcMain, app: App, getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('project:create', (_event, name: string, brainName: string) => {
@@ -133,6 +135,55 @@ export function registerProjectIPC(ipcMain: IpcMain, app: App, getMainWindow: ()
     conversationQueries.create(db).run(id, projectId, title, mode, branch || 'main')
     return conversationQueries.getById(db).get(id)
   })
+
+  ipcMain.handle('conversation:fork', (_event, opts: {
+    projectId: string
+    parentConversationId: string
+    sourceMessageId: string
+    branchType: 'continuation' | 'standalone'
+    title: string
+    mode: string
+    copyMessages: boolean
+  }) => {
+    const db = getDb()
+    const id = randomUUID()
+
+    // Check if branching columns exist — apply inline migration if not yet applied
+    const cols = (db.pragma('table_info(conversations)') as Array<{ name: string }>).map(c => c.name)
+    if (!cols.includes('branch_type')) {
+      db.exec(`ALTER TABLE conversations ADD COLUMN source_message_id TEXT`)
+      db.exec(`ALTER TABLE conversations ADD COLUMN parent_conversation_id TEXT REFERENCES conversations(id)`)
+      db.exec(`ALTER TABLE conversations ADD COLUMN branch_type TEXT NOT NULL DEFAULT 'main' CHECK(branch_type IN ('main', 'continuation', 'standalone'))`)
+      db.prepare('INSERT OR IGNORE INTO schema_migrations (version, description) VALUES (?, ?)').run(7, 'Add conversation branching support')
+      console.log('[DB] Applied inline migration for conversation branching columns')
+    }
+
+    conversationQueries.createBranch(db).run(
+      id, opts.projectId, opts.title, opts.mode,
+      'main', opts.branchType, opts.sourceMessageId, opts.parentConversationId
+    )
+
+    if (opts.copyMessages && opts.branchType === 'continuation') {
+      const sourceMessages = (messageQueries.getByConversation(db).all(opts.parentConversationId) as Array<Record<string, unknown>>)
+      const sourceMsg = sourceMessages.find(m => m.id === opts.sourceMessageId)
+      const msgsToCopy = sourceMsg
+        ? sourceMessages.filter(m => (m.created_at as number) <= (sourceMsg.created_at as number))
+        : sourceMessages
+      for (const msg of msgsToCopy) {
+        const newMsgId = randomUUID()
+        messageQueries.create(db).run(
+          newMsgId, id, msg.role as string, msg.content as string,
+          msg.mode as string, msg.context_chunks as string || '[]'
+        )
+      }
+    }
+    return conversationQueries.getById(db).get(id)
+  })
+
+  ipcMain.handle('conversation:getBranches', (_event, conversationId: string) =>
+    conversationQueries.getBranches(getDb()).all(conversationId)
+  )
+
   ipcMain.handle('conversation:getByProject', (_event, projectId: string) => conversationQueries.getByProject(getDb()).all(projectId))
   ipcMain.handle('conversation:updateTitle', (_event, conversationId: string, title: string) => { conversationQueries.updateTitle(getDb()).run(title, conversationId); return true })
   ipcMain.handle('conversation:delete', (_event, conversationId: string) => { conversationQueries.delete(getDb()).run(conversationId); return true })
@@ -147,4 +198,70 @@ export function registerProjectIPC(ipcMain: IpcMain, app: App, getMainWindow: ()
   })
   ipcMain.handle('message:getByConversation', (_event, conversationId: string) => messageQueries.getByConversation(getDb()).all(conversationId))
   ipcMain.handle('message:updateContent', (_event, messageId: string, content: string) => { messageQueries.updateContent(getDb()).run(content, messageId); return true })
+
+  ipcMain.handle('repo:checkCloneHealth', (_event, repoId: string) => {
+    const db = getDb()
+    const repo = repoQueries.getById(db).get(repoId) as { id: string; source_type: string; source_path: string } | undefined
+    if (!repo || repo.source_type !== 'github') return { cloneExists: false, isCorrupt: false }
+    const clonePath = getRepoLocalPath(repo)
+    if (!clonePath) return { cloneExists: false, isCorrupt: false }
+    const cloneExists = existsSync(clonePath)
+    const isCorrupt = cloneExists && !existsSync(join(clonePath, '.git'))
+    return { cloneExists: cloneExists && !isCorrupt, isCorrupt }
+  })
+
+  ipcMain.handle('repo:reclone', async (_event, projectId: string, repoId: string) => {
+    const mainWindow = getMainWindow()
+    const db = getDb()
+    const repo = repoQueries.getById(db).get(repoId) as {
+      id: string; source_type: string; source_path: string; branch: string; status: string
+    } | undefined
+
+    if (!repo) return { success: false, error: 'Repository not found' }
+    if (repo.source_type !== 'github') return { success: false, error: 'Only GitHub repositories can be re-cloned' }
+    if (repo.status === 'indexing') return { success: false, error: 'Re-clone already in progress' }
+
+    const token = resolveGitHubToken(projectId) || getGitHubToken(repoId) || undefined
+    const access = await checkRepoAccess(repo.source_path, token)
+    if (!access.accessible) {
+      const needsToken = !token && access.isPrivate
+      const errorMsg = needsToken
+        ? 'GitHub token is invalid or expired — please update it in Settings'
+        : (access.error || 'Cannot reach GitHub repository')
+      return { success: false, error: errorMsg, needsToken }
+    }
+
+    repoQueries.updateStatus(db).run('indexing', null, repoId)
+    mainWindow?.webContents.send('indexing:progress', {
+      repoId, phase: 'cloning', totalFiles: 0, processedFiles: 0, totalChunks: 0
+    })
+
+    ;(async () => {
+      try {
+        const cloneResult = await cloneRepository(repo.source_path, repoId, token, repo.branch)
+        await indexLocalRepository(projectId, repoId, cloneResult.localPath, mainWindow, cloneResult.branch)
+        repoQueries.updateActiveBranch(db).run(cloneResult.branch, repoId)
+        const project = projectQueries.getById(db).get(projectId) as { name: string } | undefined
+        if (project) initNanoBrain(project.name, cloneResult.localPath).catch(err => console.warn('[NanoBrain] Post-reclone init failed:', err))
+        repoQueries.updateIndexed(db).run(cloneResult.latestSha, Date.now(), 'ready', 0, 0, repoId)
+        mainWindow?.webContents.send('indexing:progress', {
+          repoId, phase: 'complete', totalFiles: 0, processedFiles: 0, totalChunks: 0
+        })
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        const needsToken = errorMsg.includes('Invalid username or token') ||
+          errorMsg.includes('Authentication failed') ||
+          errorMsg.includes('could not read Username') ||
+          errorMsg.includes('repository not found')
+        repoQueries.updateStatus(db).run('error', errorMsg, repoId)
+        mainWindow?.webContents.send('indexing:progress', {
+          repoId, phase: 'error', totalFiles: 0, processedFiles: 0, totalChunks: 0,
+          error: needsToken ? 'GitHub token is invalid or expired — please update it in Settings' : errorMsg,
+          needsToken
+        })
+      }
+    })()
+
+    return { success: true, status: 'indexing' }
+  })
 }

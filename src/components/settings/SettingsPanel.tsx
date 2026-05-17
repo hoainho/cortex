@@ -17,13 +17,317 @@ import {
   Palette,
   FolderOpen,
   Shield,
-  Trash2
+  Trash2,
+  Database,
+  Clock
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { APP_VERSION, APP_NAME } from '../../lib/version'
 import { useUIStore } from '../../stores/uiStore'
+import { BackupRestorePanel } from './BackupRestorePanel'
+import { ScheduledTasksPanel } from '../workflow/ScheduledTasksPanel'
+
+function AppInsightsSection() {
+  const [appId, setAppId] = useState('')
+  const [authMethod, setAuthMethod] = useState<'azurecli' | 'serviceprincipal' | 'apikey'>('azurecli')
+  const [apiKey, setApiKey] = useState('')
+  const [tenantId, setTenantId] = useState('')
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
+  const [timespan, setTimespan] = useState('PT24H')
+  const [showSecrets, setShowSecrets] = useState(false)
+  const [status, setStatus] = useState<{ connected: boolean; expiresAt: number; authMethod: string; error?: string } | null>(null)
+  const [loginStatus, setLoginStatus] = useState<'idle' | 'logging_in' | 'success' | 'error'>('idle')
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
+  const [testError, setTestError] = useState('')
+  const [testLatency, setTestLatency] = useState(0)
+  const [azCliInstalled, setAzCliInstalled] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const config = await window.electronAPI.appInsightsGetConfig?.()
+        if (config) {
+          setAppId(config.appId || '')
+          setAuthMethod((config.authMethod as 'azurecli' | 'serviceprincipal' | 'apikey') || 'azurecli')
+          setApiKey(config.apiKey || '')
+          setTenantId(config.tenantId || '')
+          setClientId(config.clientId || '')
+          setClientSecret(config.clientSecret || '')
+          setTimespan(config.timespan || 'PT24H')
+        }
+        const s = await window.electronAPI.appInsightsStatus?.()
+        if (s) setStatus(s)
+        const az = await window.electronAPI.appInsightsCheckAzCli?.()
+        if (az) setAzCliInstalled(az.installed)
+      } catch {}
+    }
+    load()
+  }, [])
+
+  useEffect(() => {
+    if (!appId) return
+    const interval = setInterval(async () => {
+      try {
+        const s = await window.electronAPI.appInsightsStatus?.()
+        if (s) setStatus(s)
+      } catch {}
+    }, 30_000)
+    return () => clearInterval(interval)
+  }, [appId])
+
+  const handleSave = async () => {
+    await window.electronAPI.appInsightsSetConfig?.({
+      appId, authMethod, apiKey: apiKey || undefined, tenantId: tenantId || undefined,
+      clientId: clientId || undefined, clientSecret: clientSecret || undefined, timespan,
+    })
+    const s = await window.electronAPI.appInsightsStatus?.()
+    if (s) setStatus(s)
+  }
+
+  const handleLogin = async () => {
+    setLoginStatus('logging_in')
+    setTestError('')
+    try {
+      const result = await window.electronAPI.appInsightsLogin?.()
+      if (result?.success) {
+        setLoginStatus('success')
+        const s = await window.electronAPI.appInsightsStatus?.()
+        if (s) setStatus(s)
+      } else {
+        setLoginStatus('error')
+        setTestError(result?.error || 'Đăng nhập thất bại')
+      }
+    } catch (err) {
+      setLoginStatus('error')
+      setTestError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleTest = async () => {
+    setTestStatus('testing')
+    setTestError('')
+    try {
+      const result = await window.electronAPI.appInsightsTest?.()
+      if (result?.success) {
+        setTestStatus('success')
+        setTestLatency(result.latencyMs || 0)
+      } else {
+        setTestStatus('error')
+        setTestError(result?.error || 'Kết nối thất bại')
+      }
+    } catch (err) {
+      setTestStatus('error')
+      setTestError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleDisconnect = async () => {
+    await window.electronAPI.appInsightsClearConfig?.()
+    setAppId('')
+    setApiKey('')
+    setTenantId('')
+    setClientId('')
+    setClientSecret('')
+    setStatus(null)
+    setTestStatus('idle')
+    setLoginStatus('idle')
+  }
+
+  const handleRefresh = async () => {
+    try {
+      await window.electronAPI.appInsightsRefreshToken?.()
+      const s = await window.electronAPI.appInsightsStatus?.()
+      if (s) setStatus(s)
+    } catch {}
+  }
+
+  const isConnected = status?.connected || false
+  const tokenExpiresIn = status?.expiresAt ? Math.max(0, Math.round((status.expiresAt - Date.now()) / 60_000)) : 0
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-[13px] font-semibold text-[var(--text-primary)] flex items-center gap-2">
+        <Server size={14} />
+        Azure Application Insights
+        {isConnected && <span className="text-[10px] text-green-500 font-normal">● Đã kết nối</span>}
+      </h3>
+
+      <div className="space-y-3 pl-1">
+        <div>
+          <label className="block text-[11px] text-[var(--text-secondary)] mb-1">Application ID</label>
+          <Input
+            value={appId}
+            onChange={(e) => setAppId(e.target.value)}
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            className="text-[12px] h-8"
+          />
+          <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5">Azure Portal → Application Insights → API Access</p>
+        </div>
+
+        <div>
+          <label className="block text-[11px] text-[var(--text-secondary)] mb-1">Phương thức xác thực</label>
+          <select
+            value={authMethod}
+            onChange={(e) => setAuthMethod(e.target.value as 'azurecli' | 'serviceprincipal' | 'apikey')}
+            className="w-full h-8 px-2 rounded-lg text-[12px] bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-[var(--text-primary)]"
+          >
+            <option value="azurecli">Azure CLI (az login)</option>
+            <option value="serviceprincipal">Service Principal</option>
+            <option value="apikey">API Key (legacy)</option>
+          </select>
+        </div>
+
+        {authMethod === 'azurecli' && (
+          <div className="space-y-2 p-2.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-primary)]">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleLogin}
+                disabled={loginStatus === 'logging_in'}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all',
+                  'border border-[var(--accent-primary)] bg-[var(--accent-light)] text-[var(--accent-primary)]',
+                  'hover:bg-[var(--accent-primary)] hover:text-white cursor-pointer',
+                  loginStatus === 'logging_in' && 'opacity-60 cursor-wait'
+                )}
+              >
+                {loginStatus === 'logging_in' ? (
+                  <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Đang mở browser...</span>
+                ) : isConnected ? 'Đăng nhập lại' : 'Đăng nhập Azure'}
+              </button>
+
+              {isConnected && (
+                <button onClick={handleRefresh} className="px-2 py-1.5 rounded-lg text-[11px] border border-[var(--border-primary)] hover:border-[var(--accent-primary)] cursor-pointer">
+                  Refresh Token
+                </button>
+              )}
+            </div>
+
+            {azCliInstalled === false && (
+              <p className="text-[10px] text-[var(--status-error-text)]">
+                Azure CLI chưa cài. Chạy: brew install azure-cli
+              </p>
+            )}
+
+            {isConnected && status?.expiresAt ? (
+              <p className="text-[10px] text-[var(--text-tertiary)]">
+                Token hết hạn sau {tokenExpiresIn} phút — tự động refresh
+              </p>
+            ) : null}
+          </div>
+        )}
+
+        {authMethod === 'serviceprincipal' && (
+          <div className="space-y-2">
+            <Input value={tenantId} onChange={(e) => setTenantId(e.target.value)} placeholder="Tenant ID" className="text-[12px] h-8" />
+            <Input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Client ID" className="text-[12px] h-8" />
+            <div className="relative">
+              <Input
+                type={showSecrets ? 'text' : 'password'}
+                value={clientSecret}
+                onChange={(e) => setClientSecret(e.target.value)}
+                placeholder="Client Secret"
+                className="text-[12px] h-8 pr-8"
+              />
+              <button onClick={() => setShowSecrets(!showSecrets)} className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] cursor-pointer">
+                {showSecrets ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {authMethod === 'apikey' && (
+          <div className="relative">
+            <Input
+              type={showSecrets ? 'text' : 'password'}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="API Key"
+              className="text-[12px] h-8 pr-8"
+            />
+            <button onClick={() => setShowSecrets(!showSecrets)} className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] cursor-pointer">
+              {showSecrets ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-[11px] text-[var(--text-secondary)] mb-1">Timespan mặc định</label>
+          <select
+            value={timespan}
+            onChange={(e) => setTimespan(e.target.value)}
+            className="w-full h-8 px-2 rounded-lg text-[12px] bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-[var(--text-primary)]"
+          >
+            <option value="PT1H">1 giờ</option>
+            <option value="PT6H">6 giờ</option>
+            <option value="PT24H">24 giờ</option>
+            <option value="P7D">7 ngày</option>
+            <option value="P30D">30 ngày</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSave}
+            disabled={!appId}
+            className={cn(
+              'px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all cursor-pointer',
+              'bg-[var(--accent-primary)] text-white hover:opacity-90',
+              !appId && 'opacity-40 cursor-not-allowed'
+            )}
+          >
+            Lưu
+          </button>
+          <button
+            onClick={handleTest}
+            disabled={!appId || testStatus === 'testing'}
+            className={cn(
+              'px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all cursor-pointer',
+              'border border-[var(--border-primary)] hover:border-[var(--accent-primary)]',
+              (!appId || testStatus === 'testing') && 'opacity-40 cursor-not-allowed'
+            )}
+          >
+            {testStatus === 'testing' ? (
+              <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Testing...</span>
+            ) : 'Test Connection'}
+          </button>
+          {isConnected && (
+            <button
+              onClick={handleDisconnect}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-red-500 border border-red-500/30 hover:bg-red-500/10 cursor-pointer transition-all"
+            >
+              Ngắt kết nối
+            </button>
+          )}
+        </div>
+
+        {testStatus === 'success' && (
+          <span className="flex items-center gap-1 text-[11px] text-green-500">
+            <CheckCircle size={12} /> Kết nối thành công ({testLatency}ms)
+          </span>
+        )}
+        {(testStatus === 'error' || loginStatus === 'error') && testError && (
+          <div className="px-2.5 py-1.5 rounded-md bg-red-500/10 border border-red-500/20 text-[11px] text-[var(--status-error-text)]">
+            <span className="flex items-start gap-1.5">
+              <AlertCircle size={12} className="shrink-0 mt-0.5" />
+              <span>{testError}</span>
+            </span>
+          </div>
+        )}
+        {status?.error && testStatus !== 'error' && loginStatus !== 'error' && (
+          <div className="px-2.5 py-1.5 rounded-md bg-yellow-500/10 border border-yellow-500/20 text-[11px] text-yellow-600">
+            <span className="flex items-start gap-1.5">
+              <AlertCircle size={12} className="shrink-0 mt-0.5" />
+              <span>{status.error}</span>
+            </span>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
 
 interface SettingsPanelProps {
   open: boolean
@@ -114,8 +418,14 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       }
 
       try {
-        const hasToken = await window.electronAPI.getGitHubPAT()
-        setGithubConfigured(hasToken)
+        const savedToken = await window.electronAPI.getGitHubPAT()
+        const isRealToken = typeof savedToken === 'string' && savedToken.length > 10 && savedToken !== 'true' && savedToken !== 'false'
+        if (isRealToken) {
+          setGithubToken(savedToken)
+          setGithubConfigured(true)
+        } else if (savedToken === 'true') {
+          setGithubConfigured(true)
+        }
       } catch {}
 
       try {
@@ -250,7 +560,6 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       if (githubToken) {
         await window.electronAPI.setGitHubPAT(githubToken)
         setGithubConfigured(true)
-        setGithubToken('')
       }
       if (qdrantUrl) {
         await window.electronAPI.setQdrantConfig(qdrantUrl, qdrantApiKey)
@@ -721,6 +1030,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             </div>
           </section>
 
+          {/* Azure Application Insights */}
+          <AppInsightsSection />
+
           {/* Advanced Settings (collapsed) */}
           <section>
             <button
@@ -775,32 +1087,55 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                     <span>50</span>
                   </div>
                 </div>
-                <div className="flex items-center justify-between py-2">
-                  <div>
-                    <label className="block text-[12px] text-[var(--text-secondary)]">
-                      Auto-rotation Model
-                    </label>
-                    <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
-                      Tự động chuyển model khi gặp lỗi 401/403
-                    </p>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      const newVal = !autoRotation
-                      setAutoRotationState(newVal)
-                      await window.electronAPI.setAutoRotation(newVal)
-                    }}
-                    className={cn(
-                      'relative w-9 h-5 rounded-full transition-colors duration-200',
-                      autoRotation ? 'bg-[var(--accent-primary)]' : 'bg-[var(--border-primary)]'
-                    )}
-                  >
-                    <span className={cn(
-                      'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200',
-                      autoRotation && 'translate-x-4'
-                    )} />
-                  </button>
-                </div>
+                 <div className="flex items-center justify-between py-2">
+                   <div>
+                     <label className="block text-[12px] text-[var(--text-secondary)]">
+                       Auto-rotation Model
+                     </label>
+                     <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                       Tự động chuyển model khi gặp lỗi 401/403
+                     </p>
+                   </div>
+                   <button
+                     onClick={async () => {
+                       const newVal = !autoRotation
+                       setAutoRotationState(newVal)
+                       await window.electronAPI.setAutoRotation(newVal)
+                     }}
+                     className={cn(
+                       'relative w-9 h-5 rounded-full transition-colors duration-200',
+                       autoRotation ? 'bg-[var(--accent-primary)]' : 'bg-[var(--border-primary)]'
+                     )}
+                   >
+                     <span className={cn(
+                       'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200',
+                       autoRotation && 'translate-x-4'
+                     )} />
+                   </button>
+                 </div>
+
+                 <div className="flex items-center justify-between py-2">
+                   <div>
+                     <label className="block text-[12px] text-[var(--text-secondary)]">
+                       AutoScan Training
+                     </label>
+                     <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                       Tự động train từ codebase 24/7
+                     </p>
+                   </div>
+                   <button
+                     onClick={() => useUIStore.getState().toggleAutoScan()}
+                     className={cn(
+                       'relative w-9 h-5 rounded-full transition-colors duration-200',
+                       useUIStore.getState().autoScanEnabled ? 'bg-[var(--accent-primary)]' : 'bg-[var(--border-primary)]'
+                     )}
+                   >
+                     <span className={cn(
+                       'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200',
+                       useUIStore.getState().autoScanEnabled && 'translate-x-4'
+                     )} />
+                   </button>
+                 </div>
               </div>
             )}
           </section>
@@ -955,6 +1290,26 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 </div>
               </div>
             </div>
+          </section>
+
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Clock size={16} className="text-[var(--accent-primary)]" />
+              <h3 className="text-[13px] font-semibold text-[var(--text-primary)] uppercase tracking-wider">
+                Scheduled Tasks
+              </h3>
+            </div>
+            <ScheduledTasksPanel />
+          </section>
+
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Database size={16} className="text-[var(--accent-primary)]" />
+              <h3 className="text-[13px] font-semibold text-[var(--text-primary)] uppercase tracking-wider">
+                Backup &amp; Restore
+              </h3>
+            </div>
+            <BackupRestorePanel />
           </section>
 
         </div>

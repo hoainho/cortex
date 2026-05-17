@@ -6,7 +6,7 @@
  * Batch size reduced to 8 (was 32) to stay well under token limits.
  */
 
-import { getDb, chunkQueries } from './db'
+import { getDb, chunkQueries, hashContent } from './db'
 import { BrowserWindow } from 'electron'
 import { getProxyUrl, getProxyKey, getJinaApiKey, getVoyageApiKey, getGitHubPAT, getEmbeddingProvider, getBulkEmbeddingProvider, getSetting, setSetting, getOllamaUrl, getOllamaEmbeddingModel } from './settings-service'
 import type { EmbeddingProviderType } from './settings-service'
@@ -508,6 +508,89 @@ export async function reEmbedProject(
   const db = getDb()
   db.prepare('UPDATE chunks SET embedding = NULL WHERE project_id = ?').run(projectId)
   return embedProjectChunks(projectId, onProgress)
+}
+
+export interface StalenessReport {
+  projectId: string
+  totalChunks: number
+  staleChunks: number
+  missingEmbedding: number
+  contentChanged: number
+  oldestEmbeddingAt: number | null
+  newestEmbeddingAt: number | null
+}
+
+export function getEmbeddingStalenessReport(projectId: string): StalenessReport {
+  const db = getDb()
+
+  const total = (db.prepare('SELECT COUNT(*) as n FROM chunks WHERE project_id = ?').get(projectId) as { n: number }).n
+  const missing = (db.prepare('SELECT COUNT(*) as n FROM chunks WHERE project_id = ? AND embedding IS NULL').get(projectId) as { n: number }).n
+
+  const contentChanged = (db.prepare(`
+    SELECT COUNT(*) as n FROM chunks
+    WHERE project_id = ?
+      AND embedding IS NOT NULL
+      AND content_hash IS NOT NULL
+      AND content_hash != (
+        SELECT content_hash FROM chunks c2 WHERE c2.id = chunks.id LIMIT 1
+      )
+  `).get(projectId) as { n: number }).n
+
+  const times = db.prepare(`
+    SELECT MIN(embedded_at) as oldest, MAX(embedded_at) as newest
+    FROM chunks WHERE project_id = ? AND embedded_at IS NOT NULL
+  `).get(projectId) as { oldest: number | null; newest: number | null }
+
+  return {
+    projectId,
+    totalChunks: total,
+    staleChunks: missing + contentChanged,
+    missingEmbedding: missing,
+    contentChanged,
+    oldestEmbeddingAt: times.oldest,
+    newestEmbeddingAt: times.newest,
+  }
+}
+
+export async function embedStaleChunks(
+  projectId: string,
+  onProgress?: (processed: number, total: number) => void
+): Promise<{ embedded: number; skipped: number }> {
+  const db = getDb()
+
+  const stale = db.prepare(`
+    SELECT id, content, name, relative_path, chunk_type, content_hash as stored_hash
+    FROM chunks
+    WHERE project_id = ?
+      AND (
+        embedding IS NULL
+        OR content_hash IS NULL
+        OR embedded_at IS NULL
+      )
+  `).all(projectId) as Array<{
+    id: string
+    content: string
+    name: string | null
+    relative_path: string
+    chunk_type: string
+    stored_hash: string | null
+  }>
+
+  const reallyStale = stale.filter(c => {
+    if (c.stored_hash === null) return true
+    return c.stored_hash !== hashContent(c.content)
+  })
+
+  if (reallyStale.length === 0) return { embedded: 0, skipped: stale.length }
+
+  console.log(`[Embedder] Re-embedding ${reallyStale.length} stale chunks in project ${projectId}`)
+
+  db.prepare('UPDATE chunks SET embedding = NULL WHERE id IN (' +
+    reallyStale.map(() => '?').join(',') + ')'
+  ).run(...reallyStale.map(c => c.id))
+
+  const embedded = await embedProjectChunks(projectId, onProgress)
+  return { embedded, skipped: stale.length - reallyStale.length }
 }
 
 export function isEmbedderAvailable(): boolean {

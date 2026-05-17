@@ -19,11 +19,20 @@ export interface SkillInput {
   signal?: AbortSignal
 }
 
+export interface GitHubCommentTarget {
+  owner: string
+  repo: string
+  commentId?: number
+  prNumber?: number
+  issueNumber?: number
+}
+
 export interface SkillOutput {
   content: string
   metadata?: Record<string, unknown>
   artifacts?: SkillArtifact[]
   suggestedFollowups?: string[]
+  githubTarget?: GitHubCommentTarget
 }
 
 export interface SkillArtifact {

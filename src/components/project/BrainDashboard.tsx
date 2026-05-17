@@ -32,6 +32,21 @@ import {
   Building,
   Check
 } from 'lucide-react'
+
+function SlackIcon({ size = 16, connected = false }: { size?: number; connected?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 54 54" fill="none" xmlns="http://www.w3.org/2000/svg" className={connected ? 'opacity-100' : 'opacity-60'}>
+      <path d="M19.7 31.9c0 2.8-2.3 5.1-5.1 5.1-2.8 0-5.1-2.3-5.1-5.1 0-2.8 2.3-5.1 5.1-5.1h5.1v5.1z" fill="#E01E5A" />
+      <path d="M22.3 31.9c0-2.8 2.3-5.1 5.1-5.1 2.8 0 5.1 2.3 5.1 5.1v12.7c0 2.8-2.3 5.1-5.1 5.1-2.8 0-5.1-2.3-5.1-5.1V31.9z" fill="#E01E5A" />
+      <path d="M27.4 19.7c-2.8 0-5.1-2.3-5.1-5.1 0-2.8 2.3-5.1 5.1-5.1 2.8 0 5.1 2.3 5.1 5.1v5.1h-5.1z" fill="#36C5F0" />
+      <path d="M27.4 22.3c2.8 0 5.1 2.3 5.1 5.1 0 2.8-2.3 5.1-5.1 5.1H14.7c-2.8 0-5.1-2.3-5.1-5.1 0-2.8 2.3-5.1 5.1-5.1h12.7z" fill="#36C5F0" />
+      <path d="M39.6 27.4c0-2.8 2.3-5.1 5.1-5.1 2.8 0 5.1 2.3 5.1 5.1 0 2.8-2.3 5.1-5.1 5.1h-5.1v-5.1z" fill="#2EB67D" />
+      <path d="M37 27.4c0 2.8-2.3 5.1-5.1 5.1-2.8 0-5.1-2.3-5.1-5.1V14.7c0-2.8 2.3-5.1 5.1-5.1 2.8 0 5.1 2.3 5.1 5.1v12.7z" fill="#2EB67D" />
+      <path d="M31.9 39.6c2.8 0 5.1 2.3 5.1 5.1 0 2.8-2.3 5.1-5.1 5.1-2.8 0-5.1-2.3-5.1-5.1v-5.1h5.1z" fill="#ECB22E" />
+      <path d="M31.9 37c-2.8 0-5.1-2.3-5.1-5.1 0-2.8 2.3-5.1 5.1-5.1h12.7c2.8 0 5.1 2.3 5.1 5.1 0 2.8-2.3 5.1-5.1 5.1H31.9z" fill="#ECB22E" />
+    </svg>
+  )
+}
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
@@ -70,6 +85,10 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
   const { toggleArchitecture, setLearningOpen: openLearningPanel } = useUIStore()
   const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [syncingAtlassian, setSyncingAtlassian] = useState<string | null>(null)
+
+  const [cloneHealth, setCloneHealth] = useState<Record<string, { cloneExists: boolean; isCorrupt: boolean }>>({})
+  const [recloning, setRecloning] = useState<Record<string, boolean>>({})
+  const [recloneError, setRecloneError] = useState<Record<string, { error: string; needsToken: boolean } | null>>({})
 
   // Per-repo branch state
   const { loadBranches, switchBranch: switchProjectBranch, getRepoBranch } = useProjectStore()
@@ -128,6 +147,14 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
   const [atlError, setAtlError] = useState('')
   const [atlSaving, setAtlSaving] = useState(false)
 
+  const [slackOpen, setSlackOpen] = useState(false)
+  const [slackConnected, setSlackConnected] = useState(false)
+  const [slackWorkspace, setSlackWorkspace] = useState<string | null>(null)
+  const [slackLogging, setSlackLogging] = useState(false)
+  const [slackInjecting, setSlackInjecting] = useState(false)
+  const [slackError, setSlackError] = useState('')
+  const [slackInjectResult, setSlackInjectResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
   useEffect(() => {
     if (!open || !projectId) return
     loadStats()
@@ -147,6 +174,10 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
         setAtlStatus('idle')
       }
     }).catch(() => {})
+    window.electronAPI.slackGetCredentials(projectId).then(creds => {
+      setSlackConnected(creds.connected)
+      setSlackWorkspace(creds.workspace)
+    }).catch(() => {})
   }, [open, projectId])
 
   // Load branches for all git repos (both github and local) when stats loads
@@ -158,6 +189,39 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
       }
     })
   }, [stats?.repos, loadBranches])
+
+  useEffect(() => {
+    if (!stats?.repos) return
+    const githubRepos = stats.repos.filter(r => r.source_type === 'github')
+    if (githubRepos.length === 0) return
+    githubRepos.forEach(async (repo) => {
+      try {
+        const result = await window.electronAPI.checkCloneHealth(repo.id)
+        setCloneHealth(prev => ({ ...prev, [repo.id]: result }))
+      } catch (_) { }
+    })
+  }, [stats?.repos])
+
+  useEffect(() => {
+    if (!open) return
+    const cleanup = window.electronAPI.onIndexingProgress((data) => {
+      const { repoId, phase, error, needsToken } = data
+      if (phase === 'complete' || phase === 'done') {
+        setRecloning(prev => ({ ...prev, [repoId]: false }))
+        setRecloneError(prev => ({ ...prev, [repoId]: null }))
+        window.electronAPI.checkCloneHealth(repoId)
+          .then((result) => setCloneHealth(prev => ({ ...prev, [repoId]: result })))
+          .catch(() => {})
+      } else if (phase === 'error') {
+        setRecloning(prev => ({ ...prev, [repoId]: false }))
+        setRecloneError(prev => ({
+          ...prev,
+          [repoId]: { error: error || 'Reclone failed', needsToken: needsToken ?? false }
+        }))
+      }
+    })
+    return () => { cleanup() }
+  }, [open])
 
   // Close branch dropdown on outside click
   useEffect(() => {
@@ -313,6 +377,28 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
       await loadStats()
     } catch {
       // handled silently
+    }
+  }
+
+  const handleReclone = async (repoId: string) => {
+    if (!projectId) return
+    setRecloning(prev => ({ ...prev, [repoId]: true }))
+    setRecloneError(prev => ({ ...prev, [repoId]: null }))
+    try {
+      const result = await window.electronAPI.reclone(projectId, repoId)
+      if (!result.success) {
+        setRecloning(prev => ({ ...prev, [repoId]: false }))
+        setRecloneError(prev => ({
+          ...prev,
+          [repoId]: { error: result.error || 'Reclone failed', needsToken: result.needsToken ?? false }
+        }))
+      }
+    } catch (err) {
+      setRecloning(prev => ({ ...prev, [repoId]: false }))
+      setRecloneError(prev => ({
+        ...prev,
+        [repoId]: { error: err instanceof Error ? err.message : 'Reclone failed', needsToken: false }
+      }))
     }
   }
 
@@ -730,6 +816,25 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
                             )}>
                               {repo.status}
                             </span>
+                            {repo.source_type === 'github' && (cloneHealth[repo.id]?.cloneExists === false || cloneHealth[repo.id]?.isCorrupt === true) && (
+                              <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-[var(--status-warning-bg)] text-[var(--status-warning-text)]">
+                                Sync needed
+                              </span>
+                            )}
+                            {repo.source_type === 'github' && (
+                              <button
+                                onClick={() => handleReclone(repo.id)}
+                                disabled={recloning[repo.id]}
+                                className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--accent-primary)] transition-colors disabled:opacity-50"
+                                title="Sync (reclone)"
+                              >
+                                {recloning[repo.id] ? (
+                                  <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                  <Download size={12} />
+                                )}
+                              </button>
+                            )}
                             <button
                               onClick={() => handleReplaceRepo(repo.id)}
                               className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--accent-primary)] transition-colors"
@@ -749,6 +854,16 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
                         <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
                           {{ github: 'GitHub', local: 'Local', jira: 'Jira', confluence: 'Confluence' }[repo.source_type] || repo.source_type} · Sync: {formatTime(repo.last_indexed_at)}
                         </p>
+                        {recloning[repo.id] && (
+                          <p className="text-[11px] text-[var(--status-warning-text)] mt-1">Syncing...</p>
+                        )}
+                        {recloneError[repo.id] && (
+                          <p className="text-[11px] text-[var(--status-error-text)] mt-1">
+                            {recloneError[repo.id]?.needsToken
+                              ? 'GitHub token is invalid or expired — update it in Settings'
+                              : recloneError[repo.id]?.error}
+                          </p>
+                        )}
                         {repo.source_type === 'github' && (() => {
                           const branchState = getRepoBranch(repo.id)
                           const isLoading = branchesLoading === repo.id
@@ -1104,6 +1219,176 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
                       <span className="flex items-center gap-1 text-[12px] text-[var(--status-error-text)]">
                         <AlertCircle size={14} /> {atlError}
                       </span>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              {/* Slack Connect */}
+              <section>
+                <button onClick={() => setSlackOpen(!slackOpen)} className="flex items-center gap-2 w-full mb-3">
+                  {slackOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  <div className="flex items-center gap-2">
+                    <SlackIcon size={16} connected={slackConnected} />
+                    <h3 className="text-[13px] font-semibold text-[var(--text-primary)] uppercase tracking-wider">Slack</h3>
+                  </div>
+                  {slackConnected && (
+                    <span className="ml-auto text-[11px] text-[var(--status-success-text)] flex items-center gap-1">
+                      <CheckCircle size={12} />
+                      {slackWorkspace ? `${slackWorkspace}.slack.com` : 'Đã kết nối'}
+                    </span>
+                  )}
+                </button>
+
+                {slackOpen && (
+                  <div className="space-y-3 pl-2">
+                    {slackConnected ? (
+                      <>
+                        <div className="flex items-center gap-3 px-3 py-3 rounded-lg bg-[var(--status-success-bg)] border border-[var(--status-success-border)]">
+                          <SlackIcon size={20} connected />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] font-semibold text-[var(--status-success-text)]">Đã kết nối Slack</p>
+                            {slackWorkspace && (
+                              <p className="text-[11px] text-[var(--status-success-text)] opacity-80 truncate">{slackWorkspace}.slack.com</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="px-3 py-2.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-primary)] space-y-1.5">
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Sử dụng với MCP</p>
+                          <p className="text-[11px] text-[var(--text-tertiary)] leading-relaxed">
+                            Token đã lưu encrypted. Để dùng với{' '}
+                            <code className="px-1 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--accent-primary)] text-[10px] font-mono">slack-mcp-server</code>,
+                            cấu hình MCP bên dưới với{' '}
+                            <code className="px-1 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--accent-primary)] text-[10px] font-mono">SLACK_MCP_XOXC_TOKEN</code>{' '}
+                            và <code className="px-1 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--accent-primary)] text-[10px] font-mono">SLACK_MCP_XOXD_TOKEN</code>.
+                          </p>
+                          <p className="text-[10px] text-[var(--text-tertiary)] opacity-70">
+                            💡 Token Slack session có thể hết hạn sau vài ngày — đăng nhập lại nếu MCP mất kết nối.
+                          </p>
+                        </div>
+
+                        {slackInjectResult && (
+                          <div className={cn(
+                            'flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] animate-in fade-in duration-200',
+                            slackInjectResult.type === 'success'
+                              ? 'bg-[var(--status-success-bg)] border border-[var(--status-success-border)] text-[var(--status-success-text)]'
+                              : 'bg-[var(--status-error-bg)] border border-[var(--status-error-border)] text-[var(--status-error-text)]'
+                          )}>
+                            {slackInjectResult.type === 'success' ? <CheckCircle size={13} className="shrink-0" /> : <AlertCircle size={13} className="shrink-0" />}
+                            {slackInjectResult.message}
+                          </div>
+                        )}
+
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary" size="sm" className="flex-1 justify-center" disabled={slackInjecting}
+                            onClick={async () => {
+                              if (!projectId) return
+                              setSlackInjecting(true)
+                              setSlackInjectResult(null)
+                              try {
+                                const r = await window.electronAPI.slackInjectIntoMCP(projectId)
+                                setSlackInjectResult({
+                                  type: r.success ? 'success' : 'error',
+                                  message: r.success ? 'Đã sync tokens vào Slack MCP — kết nối lại thành công!' : (r.error || 'Thất bại'),
+                                })
+                                setTimeout(() => setSlackInjectResult(null), 5000)
+                              } catch (err) {
+                                setSlackInjectResult({ type: 'error', message: err instanceof Error ? err.message : 'Lỗi' })
+                              } finally {
+                                setSlackInjecting(false)
+                              }
+                            }}
+                          >
+                            {slackInjecting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                            Sync vào MCP
+                          </Button>
+                          <Button
+                            variant="secondary" size="sm"
+                            onClick={async () => {
+                              if (!projectId) return
+                              await window.electronAPI.slackDisconnect(projectId)
+                              setSlackConnected(false)
+                              setSlackWorkspace(null)
+                              setSlackError('')
+                              setSlackInjectResult(null)
+                            }}
+                          >
+                            <Unplug size={14} />
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-primary)] space-y-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <SlackIcon size={22} connected={false} />
+                            <div>
+                              <p className="text-[13px] font-semibold text-[var(--text-primary)]">Kết nối Slack Workspace</p>
+                              <p className="text-[11px] text-[var(--text-tertiary)]">Không cần quyền Admin hay Bot token</p>
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+                            Đăng nhập bằng tài khoản Slack thường của bạn. Cortex tự động lấy session token và lưu encrypted.
+                          </p>
+                          <div className="rounded-lg bg-[var(--bg-primary)] border border-[var(--border-primary)] overflow-hidden">
+                            <p className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider border-b border-[var(--border-primary)]">Hướng dẫn</p>
+                            <div className="px-3 py-2 space-y-1.5">
+                              {[
+                                'Bấm "Đăng nhập Slack" bên dưới',
+                                'Nhập email/password hoặc chọn workspace',
+                                'Nếu có nút "Use Slack in your browser" — bấm vào đó',
+                                'Cortex tự động capture token khi Slack web load xong',
+                              ].map((step, i) => (
+                                <div key={i} className="flex items-start gap-2">
+                                  <span className="w-4 h-4 rounded-full bg-[var(--accent-light)] text-[var(--accent-primary)] text-[9px] font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
+                                  <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">{step}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-1.5">
+                            <AlertCircle size={12} className="text-[var(--status-warning-text)] mt-0.5 shrink-0" />
+                            <p className="text-[10px] text-[var(--status-warning-text)] leading-relaxed">
+                              Session token hết hạn sau vài ngày nếu không dùng Slack trên browser. Bấm đăng nhập lại khi cần.
+                            </p>
+                          </div>
+                        </div>
+
+                        {slackError && (
+                          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--status-error-bg)] border border-[var(--status-error-border)]">
+                            <AlertCircle size={13} className="text-[var(--status-error-text)] shrink-0" />
+                            <p className="text-[12px] text-[var(--status-error-text)]">{slackError}</p>
+                          </div>
+                        )}
+
+                        <Button
+                          size="sm" className="w-full justify-center gap-2"
+                          onClick={async () => {
+                            if (!projectId) return
+                            setSlackLogging(true)
+                            setSlackError('')
+                            try {
+                              const result = await window.electronAPI.slackLogin(projectId)
+                              if (result.success) {
+                                setSlackConnected(true)
+                                setSlackWorkspace(result.workspace || null)
+                              } else {
+                                setSlackError(result.error || 'Đăng nhập thất bại')
+                              }
+                            } catch (err) {
+                              setSlackError(err instanceof Error ? err.message : 'Lỗi không xác định')
+                            } finally {
+                              setSlackLogging(false)
+                            }
+                          }}
+                          disabled={slackLogging}
+                        >
+                          {slackLogging ? <Loader2 size={14} className="animate-spin" /> : <SlackIcon size={14} connected={false} />}
+                          {slackLogging ? 'Đang chờ đăng nhập...' : 'Đăng nhập Slack'}
+                        </Button>
+                      </>
                     )}
                   </div>
                 )}

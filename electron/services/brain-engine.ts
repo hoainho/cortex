@@ -12,7 +12,7 @@ import { BrowserWindow } from 'electron'
 import { scanDirectory, readFileContent, getDirectoryTree, type ScannedFile } from './file-scanner'
 import { chunkCode, chunkDocument, type CodeChunk } from './code-chunker'
 import { convertDocument, isDocumentFile } from './document-converter'
-import { getDb, chunkQueries, repoQueries, repoTreeQueries } from './db'
+import { getDb, chunkQueries, repoQueries, repoTreeQueries, hashContent } from './db'
 import { randomUUID } from 'crypto'
 import { embedProjectChunks, needsReEmbed, reEmbedProject } from './embedder'
 import { hybridSearch, type SearchResult } from './vector-search'
@@ -79,23 +79,24 @@ export async function indexLocalRepository(
     const insertMany = db.transaction((chunks: CodeChunk[]) => {
       for (const chunk of chunks) {
         insertChunk.run(
-          chunk.id,
-          chunk.projectId,
-          chunk.repoId,
-          chunk.filePath,
-          chunk.relativePath,
-          chunk.language,
-          chunk.chunkType,
-          chunk.name,
-          chunk.content,
-          chunk.lineStart,
-          chunk.lineEnd,
-          chunk.tokenEstimate,
-          JSON.stringify(chunk.dependencies),
-          JSON.stringify(chunk.exports),
-          JSON.stringify(chunk.metadata),
-          chunk.branch
-        )
+                  chunk.id,
+                  chunk.projectId,
+                  chunk.repoId,
+                  chunk.filePath,
+                  chunk.relativePath,
+                  chunk.language,
+                  chunk.chunkType,
+                  chunk.name,
+                  chunk.content,
+                  chunk.lineStart,
+                  chunk.lineEnd,
+                  chunk.tokenEstimate,
+                  JSON.stringify(chunk.dependencies),
+                  JSON.stringify(chunk.exports),
+                  JSON.stringify(chunk.metadata),
+                  chunk.branch,
+                  hashContent(chunk.content)
+                )
       }
     })
 

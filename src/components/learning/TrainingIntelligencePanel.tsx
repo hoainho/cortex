@@ -221,13 +221,14 @@ function ActivityCard({ activity, isCurrent = false }: { activity: AutoScanActiv
 
 
 export function TrainingIntelligencePanel({ open, onClose, projectId }: TrainingIntelligencePanelProps) {
-  const { projects, setAutoScanEnabled } = useProjectStore()
+  const { projects, setAutoScanEnabled, setAutoTrainEnabled } = useProjectStore()
   const currentProject = projectId ? projects.find(p => p.id === projectId) : null
 
   const [activeTab, setActiveTab] = useState<TabKey>('today')
   const [historyCollapsed, setHistoryCollapsed] = useState(true)
   const [recentCollapsed, setRecentCollapsed] = useState(false)
   const [togglingAutoScan, setTogglingAutoScan] = useState(false)
+  const [togglingAutoTrain, setTogglingAutoTrain] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
   const [intelligence, setIntelligence] = useState<IntelligenceScore | null>(null)
@@ -249,6 +250,7 @@ export function TrainingIntelligencePanel({ open, onClose, projectId }: Training
   const [loadingHistory, setLoadingHistory] = useState(false)
 
   const autoScanEnabled = currentProject?.autoScanEnabled ?? false
+  const autoTrainEnabled = currentProject?.autoTrainEnabled ?? true
 
   const fetchProgress = useCallback(async () => {
     const p = await window.electronAPI?.autoscanGetProgress?.()
@@ -394,6 +396,13 @@ export function TrainingIntelligencePanel({ open, onClose, projectId }: Training
     if (newEnabled) await window.electronAPI?.autoscanTrigger?.(projectId)
     await fetchProgress()
     setTogglingAutoScan(false)
+  }
+
+  const handleAutoTrainToggle = async () => {
+    if (!projectId || togglingAutoTrain) return
+    setTogglingAutoTrain(true)
+    await setAutoTrainEnabled(projectId, !autoTrainEnabled)
+    setTogglingAutoTrain(false)
   }
 
   const handleHistoryToggle = async () => {
@@ -560,6 +569,45 @@ export function TrainingIntelligencePanel({ open, onClose, projectId }: Training
                 </span>
               </div>
             )}
+          </div>
+
+          {/* ── AutoTrain Toggle ──────────────────────── */}
+          <div className={cn(
+            'rounded-xl p-4 border transition-colors',
+            autoTrainEnabled
+              ? 'bg-[var(--accent-light)] border-[var(--accent-primary)]/30'
+              : 'bg-[var(--bg-secondary)] border-[var(--border-primary)]'
+          )}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  'w-8 h-8 rounded-lg flex items-center justify-center',
+                  autoTrainEnabled ? 'bg-[var(--accent-primary)]/20' : 'bg-[var(--bg-primary)]'
+                )}>
+                  <Zap size={15} className={autoTrainEnabled ? 'text-[var(--accent-primary)]' : 'text-[var(--text-tertiary)]'} />
+                </div>
+                <div>
+                  <p className="text-[13px] font-semibold text-[var(--text-primary)]">
+                    {autoTrainEnabled ? 'Auto-Train bật' : 'Auto-Train tắt'}
+                  </p>
+                  <p className="text-[11px] text-[var(--text-tertiary)]">Tự động học từ feedback mỗi 30 phút</p>
+                </div>
+              </div>
+              <button
+                onClick={handleAutoTrainToggle}
+                disabled={togglingAutoTrain}
+                className={cn(
+                  'relative w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none',
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
+                  autoTrainEnabled ? 'bg-[var(--accent-primary)]' : 'bg-[var(--border-secondary)]'
+                )}
+              >
+                <span className={cn(
+                  'absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200',
+                  autoTrainEnabled ? 'translate-x-5' : 'translate-x-0'
+                )} />
+              </button>
+            </div>
           </div>
 
           {/* ── Timeline Tabs ──────────────────────────── */}

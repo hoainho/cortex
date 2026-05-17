@@ -93,6 +93,8 @@ import {
 } from './services/chat-pipeline'
 import { loadPluginConfig, isHookDisabled, getPluginConfig } from './services/plugin-config'
 import { registerAllIPC } from './ipc'
+import { startAutoBackup, stopAutoBackup } from './services/backup/auto-backup'
+import { initScheduledJobs } from './ipc/scheduler.ipc'
 
 // V2: Efficiency Engine
 import { initCostSchema, recordUsage, estimateCost, getCompressionStats, getCostByProject, getDailyCosts } from './services/skills/efficiency/cost-tracker'
@@ -391,6 +393,18 @@ app.whenReady().then(() => {
     const db = getDb()
     const row = projectQueries.getById(db).get(projectId) as { auto_scan_enabled: number } | undefined
     return row ? row.auto_scan_enabled === 1 : false
+  })
+
+  ipcMain.handle('project:setAutoTrainEnabled', (_event, projectId: string, enabled: boolean) => {
+    const db = getDb()
+    projectQueries.updateAutoTrainEnabled(db).run(enabled ? 1 : 0, projectId)
+    return true
+  })
+
+  ipcMain.handle('project:getAutoTrainEnabled', (_event, projectId: string) => {
+    const db = getDb()
+    const row = projectQueries.getById(db).get(projectId) as { auto_train_enabled: number } | undefined
+    return row ? row.auto_train_enabled === 1 : true
   })
 
   ipcMain.handle('project:stats', (_event, projectId: string) => {
@@ -2768,12 +2782,14 @@ Return ONLY the enhanced prompt, nothing else.`
   const autoTrainTimer = setInterval(() => {
     try {
       const db = getDb()
-      const projects = projectQueries.getAll(db).all() as any[]
-      for (const project of projects) {
-        const feedbackCount = (db.prepare('SELECT COUNT(*) as count FROM feedback_signals WHERE project_id = ?').get(project.id) as { count: number })?.count || 0
+      const projects = projectQueries.getAllAutoTrainEnabled(db).all() as Array<{ id: string }>
+      for (const { id: projectId } of projects) {
+        const project = projectQueries.getById(db).get(projectId) as { name: string } | undefined
+        if (!project) continue
+        const feedbackCount = (db.prepare('SELECT COUNT(*) as count FROM feedback_signals WHERE project_id = ?').get(projectId) as { count: number })?.count || 0
         if (feedbackCount > 0) {
-          const { converted } = convertSignalsToTrainingPairs(project.id)
-          const { trained, weightsUpdated } = trainFromPairs(project.id)
+          const { converted } = convertSignalsToTrainingPairs(projectId)
+          const { trained, weightsUpdated } = trainFromPairs(projectId)
           if (converted > 0 || trained > 0) {
             console.log(`[AutoTrain] Project ${project.name}: ${converted} signals → ${trained} pairs → ${weightsUpdated} weights`)
           }
@@ -3244,7 +3260,16 @@ Return ONLY the enhanced prompt, nothing else.`
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 
+  ipcMain.handle('app:restart', () => {
+    app.relaunch()
+    app.exit(0)
+  })
+
+  startAutoBackup()
+  initScheduledJobs()
+
   app.on('before-quit', async () => {
+    stopAutoBackup()
     clearInterval(autoTrainTimer)
     shutdownTrainingEngine()
     stopAllWatchers()

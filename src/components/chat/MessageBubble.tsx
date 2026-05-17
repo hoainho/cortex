@@ -12,6 +12,8 @@ import type { Message } from '../../types'
 import { TypingIndicator } from './TypingIndicator'
 import { ThinkingProcess } from './ThinkingProcess'
 import { useChatStore } from '../../stores/chatStore'
+import { ForkButton } from './ForkButton'
+import { ArtifactViewer, isArtifactLang } from './ArtifactViewer'
 
 function highlightText(text: string, query: string): ReactNode {
   if (!query) return text
@@ -513,11 +515,21 @@ function GeneratedImagePreview({ src, alt }: { src: string; alt?: string }) {
   )
 }
 
+function extractTextFromReactChildren(children: unknown): string {
+  if (typeof children === 'string') return children
+  if (typeof children === 'number') return String(children)
+  if (Array.isArray(children)) return children.map(extractTextFromReactChildren).join('')
+  if (children && typeof children === 'object' && 'props' in (children as object)) {
+    return extractTextFromReactChildren((children as { props: { children?: unknown } }).props.children)
+  }
+  return ''
+}
+
 const markdownComponents = {
   code({ className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '')
     const lang = match?.[1]
-    const codeString = String(children).replace(/\n$/, '')
+    const codeString = extractTextFromReactChildren(children).replace(/\n$/, '')
 
     // Mermaid diagram
     if (lang === 'mermaid') {
@@ -533,6 +545,9 @@ const markdownComponents = {
       // Detect tree structure inside fenced code blocks too
       if (hasTreeStructure(codeString)) {
         return <TreeBlock content={codeString} />
+      }
+      if (isArtifactLang(lang)) {
+        return <ArtifactViewer code={codeString} lang={lang} />
       }
       return (
         <div className="rounded-xl overflow-hidden border border-[var(--border-primary)] my-3">
@@ -943,11 +958,16 @@ export const MessageBubble = memo(function MessageBubble({ message, onFeedback, 
           )}
 
           {!isUser && message.content && !message.isStreaming && (
-            <div className="stream-fade-in">
+            <div className="stream-fade-in flex items-center gap-1 flex-wrap">
               <MessageCopyButton text={message.content} onCopy={onCopy ? () => onCopy(message.id) : undefined} />
               {onFeedback && (
                 <FeedbackButtons messageId={message.id} onFeedback={onFeedback} />
               )}
+              <ForkButton
+                messageId={message.id}
+                conversationId={message.conversationId}
+                className="opacity-0 group-hover/message:opacity-100 transition-opacity"
+              />
             </div>
           )}
         </div>

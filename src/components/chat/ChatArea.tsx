@@ -43,7 +43,17 @@ function QueuePill({ count, onClear }: { count: number; onClear: () => void }) {
 
 export function ChatArea() {
   const { activeProjectId, projects, activeBranch } = useProjectStore()
-  const { conversations, activeConversationId, addMessage, createConversation, loadConversations, loadMessagesForConversation, setMessageStreaming } = useChatStore()
+  const addMessage = useChatStore(s => s.addMessage)
+  const createConversation = useChatStore(s => s.createConversation)
+  const loadConversations = useChatStore(s => s.loadConversations)
+  const loadMessagesForConversation = useChatStore(s => s.loadMessagesForConversation)
+  const setMessageStreaming = useChatStore(s => s.setMessageStreaming)
+  const activeConversationId = useChatStore(s => s.activeConversationId)
+  const conversations = useChatStore(s => s.conversations)
+  const activeConversation = conversations.find(c => c.id === activeConversationId)
+  const validConversation = activeConversation && activeProjectId && activeConversation.projectId === activeProjectId
+    ? activeConversation
+    : null
   const { mode, setArchitectureOpen, setDashboardOpen, setMemoryOpen, setSkillsOpen, setLearningOpen, setAgentOpen, setTrainingIntelligenceOpen } = useUIStore()
   const syncState = useSyncStore()
   const { isSyncing, hasFileChanges, lastSyncAt } = syncState
@@ -81,13 +91,6 @@ export function ChatArea() {
   const lastContextChunkIds = useRef<string[]>([])
 
   const activeProject = projects.find((p) => p.id === activeProjectId)
-  const activeConversation = conversations.find((c) => c.id === activeConversationId)
-
-  // Ensure conversation belongs to active project
-  const validConversation =
-    activeConversation && activeConversation.projectId === activeProjectId
-      ? activeConversation
-      : null
 
   // Load conversations when project changes
   useEffect(() => {
@@ -332,41 +335,42 @@ export function ChatArea() {
     }
   }, [activeProjectId, activeRepo, syncState])
 
+  const validConversationId = validConversation?.id ?? null
+
   const handleFeedback = useCallback((messageId: string, type: 'thumbs_up' | 'thumbs_down') => {
-    if (!activeProjectId || !validConversation) return
-    const message = validConversation.messages.find(m => m.id === messageId)
+    if (!activeProjectId || !validConversationId) return
+    const conv = useChatStore.getState().conversations.find(c => c.id === validConversationId)
+    if (!conv) return
+    const message = conv.messages.find(m => m.id === messageId)
     if (!message) return
 
-    const prevUserMsg = validConversation.messages
-      .filter(m => m.role === 'user')
-      .slice(-1)[0]
+    const prevUserMsg = conv.messages.filter(m => m.role === 'user').slice(-1)[0]
 
     window.electronAPI?.sendFeedback?.(
       messageId,
-      validConversation.id,
+      validConversationId,
       activeProjectId,
       type,
       prevUserMsg?.content || '',
       lastContextChunkIds.current
     )
-  }, [activeProjectId, validConversation])
+  }, [activeProjectId, validConversationId])
 
   const handleCopy = useCallback((messageId: string) => {
-    if (!activeProjectId || !validConversation) return
+    if (!activeProjectId || !validConversationId) return
 
-    const prevUserMsg = validConversation.messages
-      .filter(m => m.role === 'user')
-      .slice(-1)[0]
+    const conv = useChatStore.getState().conversations.find(c => c.id === validConversationId)
+    const prevUserMsg = conv?.messages.filter(m => m.role === 'user').slice(-1)[0]
 
     window.electronAPI?.sendFeedback?.(
       messageId,
-      validConversation.id,
+      validConversationId,
       activeProjectId,
       'copy',
       prevUserMsg?.content || '',
       lastContextChunkIds.current
     )
-  }, [activeProjectId, validConversation])
+  }, [activeProjectId, validConversationId])
 
   const sendMessageNow = useCallback(async (content: string, attachments?: import('../../types').ChatAttachment[], agentModeId?: string | null) => {
     if (!activeProjectId) return
@@ -474,16 +478,39 @@ export function ChatArea() {
       setMessageQueue(prev => [...prev, { id: queueId, content, queuedAt: Date.now() }])
 
       const waitAndSend = async () => {
-        while (true) {
-          const currentConv = useChatStore.getState().conversations.find(c => c.id === validConversation?.id)
-          const stillStreaming = currentConv
-            ? currentConv.messages.length > 0 && currentConv.messages[currentConv.messages.length - 1].isStreaming === true
-            : false
-          if (!stillStreaming && !processingRef.current) break
-          await new Promise(r => setTimeout(r, 300))
-        }
+        const convId = validConversation?.id
+        await new Promise<void>((resolve) => {
+          const isIdle = () => {
+            const conv = useChatStore.getState().conversations.find(c => c.id === convId)
+            const streaming = conv ? conv.messages.at(-1)?.isStreaming === true : false
+            return !streaming && !processingRef.current
+          }
+
+          if (isIdle()) { resolve(); return }
+
+          const unsub = useChatStore.subscribe(
+            s => s.conversations.find(c => c.id === convId)?.messages.at(-1)?.isStreaming ?? false,
+            (streaming) => {
+              if (!streaming && !processingRef.current) {
+                unsub()
+                clearTimeout(timeout)
+                resolve()
+              }
+            }
+          )
+
+          const timeout = setTimeout(() => { unsub(); resolve() }, 5 * 60 * 1000)
+        })
+
         setMessageQueue(prev => prev.filter(q => q.id !== queueId))
-        await sendMessageNow(content, attachments, agentModeId)
+        if (!processingRef.current) {
+          processingRef.current = true
+          try {
+            await sendMessageNow(content, attachments, agentModeId)
+          } finally {
+            processingRef.current = false
+          }
+        }
       }
 
       waitAndSend()

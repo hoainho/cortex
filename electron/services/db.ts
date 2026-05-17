@@ -1,7 +1,12 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
-import { mkdirSync, existsSync } from 'fs'
+import { mkdirSync, existsSync, copyFileSync } from 'fs'
+import { createHash } from 'crypto'
+
+export function hashContent(content: string): string {
+  return createHash('sha256').update(content).digest('hex').slice(0, 16)
+}
 
 let db: Database.Database | null = null
 
@@ -118,7 +123,48 @@ const MIGRATIONS: Migration[] = [
       `UPDATE projects SET auto_scan_enabled = 0`,
     ]
   },
+  {
+    version: 7,
+    description: 'Add conversation branching support (source_message_id, parent_conversation_id, branch_type)',
+    sql: [
+      `ALTER TABLE conversations ADD COLUMN source_message_id TEXT`,
+      `ALTER TABLE conversations ADD COLUMN parent_conversation_id TEXT REFERENCES conversations(id)`,
+      `ALTER TABLE conversations ADD COLUMN branch_type TEXT NOT NULL DEFAULT 'main' CHECK(branch_type IN ('main', 'continuation', 'standalone'))`,
+      `CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conversation_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_conversations_source ON conversations(source_message_id)`,
+    ]
+  },
+  {
+    version: 8,
+    description: 'Add embedding staleness tracking: embedded_at timestamp and content_hash per chunk',
+    sql: [
+      `ALTER TABLE chunks ADD COLUMN embedded_at INTEGER`,
+      `ALTER TABLE chunks ADD COLUMN content_hash TEXT`,
+      `UPDATE chunks SET embedded_at = created_at WHERE embedding IS NOT NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_chunks_embedded_at ON chunks(embedded_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash)`,
+    ]
+  },
+  {
+    version: 9,
+    description: 'Add per-project auto_train_enabled toggle (default on to preserve existing behaviour)',
+    sql: [
+      `ALTER TABLE projects ADD COLUMN auto_train_enabled INTEGER NOT NULL DEFAULT 1`,
+    ]
+  },
 ]
+
+function preMigrationBackup(dbPath: string, version: number): void {
+  try {
+    const backupDir = join(app.getPath('userData'), 'cortex-data', 'backups')
+    if (!existsSync(backupDir)) mkdirSync(backupDir, { recursive: true })
+    const dest = join(backupDir, `pre-migration-v${version}-${Date.now()}.db`)
+    copyFileSync(dbPath, dest)
+    console.log(`[DB] Pre-migration backup created: pre-migration-v${version}.db`)
+  } catch (err) {
+    console.warn(`[DB] Pre-migration backup failed (non-fatal):`, (err as Error).message)
+  }
+}
 
 function runMigrations(database: Database.Database): void {
   database.exec(`
@@ -133,6 +179,11 @@ function runMigrations(database: Database.Database): void {
     (database.prepare('SELECT version FROM schema_migrations').all() as Array<{ version: number }>)
       .map(r => r.version)
   )
+
+  const pending = MIGRATIONS.filter(m => !applied.has(m.version))
+  if (pending.length > 0) {
+    preMigrationBackup(getDbPath(), pending[0].version)
+  }
 
   for (const migration of MIGRATIONS) {
     if (applied.has(migration.version)) continue
@@ -452,6 +503,12 @@ export const projectQueries = {
 
   getAllAutoScanEnabled: (db: Database.Database) =>
     db.prepare('SELECT id FROM projects WHERE auto_scan_enabled = 1'),
+
+  updateAutoTrainEnabled: (db: Database.Database) =>
+    db.prepare('UPDATE projects SET auto_train_enabled = ?, updated_at = unixepoch() * 1000 WHERE id = ?'),
+
+  getAllAutoTrainEnabled: (db: Database.Database) =>
+    db.prepare('SELECT id FROM projects WHERE auto_train_enabled = 1'),
 }
 
 export const repoQueries = {
@@ -459,6 +516,9 @@ export const repoQueries = {
     db.prepare(
       'INSERT INTO repositories (id, project_id, source_type, source_path, branch) VALUES (?, ?, ?, ?, ?)'
     ),
+
+  getById: (db: Database.Database) =>
+    db.prepare('SELECT * FROM repositories WHERE id = ?'),
 
   getByProject: (db: Database.Database) =>
     db.prepare('SELECT * FROM repositories WHERE project_id = ? ORDER BY created_at DESC'),
@@ -481,8 +541,8 @@ export const repoQueries = {
 export const chunkQueries = {
   insert: (db: Database.Database) =>
     db.prepare(`
-      INSERT INTO chunks (id, project_id, repo_id, file_path, relative_path, language, chunk_type, name, content, line_start, line_end, token_estimate, dependencies, exports, metadata, branch)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO chunks (id, project_id, repo_id, file_path, relative_path, language, chunk_type, name, content, line_start, line_end, token_estimate, dependencies, exports, metadata, branch, content_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
 
   getByProject: (db: Database.Database) =>
@@ -511,7 +571,25 @@ export const chunkQueries = {
     db.prepare('SELECT COUNT(*) as count FROM chunks WHERE project_id = ?'),
 
   updateEmbedding: (db: Database.Database) =>
-    db.prepare('UPDATE chunks SET embedding = ? WHERE id = ?'),
+    db.prepare('UPDATE chunks SET embedding = ?, embedded_at = (unixepoch() * 1000) WHERE id = ?'),
+
+  markStaleByFile: (db: Database.Database) =>
+    db.prepare('UPDATE chunks SET embedding = NULL, embedded_at = NULL WHERE repo_id = ? AND relative_path = ?'),
+
+  getStaleByProject: (db: Database.Database) =>
+    db.prepare(`
+      SELECT id, content, name, relative_path, chunk_type, content_hash, embedded_at, created_at
+      FROM chunks
+      WHERE project_id = ?
+        AND (
+          embedding IS NULL
+          OR content_hash IS NULL
+          OR content_hash != (SELECT content_hash FROM chunks c2 WHERE c2.id = chunks.id)
+        )
+    `),
+
+  updateContentHash: (db: Database.Database) =>
+    db.prepare('UPDATE chunks SET content_hash = ? WHERE id = ?'),
 
   getByRepoBranch: (db: Database.Database) =>
     db.prepare('SELECT * FROM chunks WHERE repo_id = ? AND branch = ?'),
@@ -573,6 +651,18 @@ export const conversationQueries = {
 
   togglePin: (db: Database.Database) =>
     db.prepare('UPDATE conversations SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END WHERE id = ?'),
+
+  createBranch: (db: Database.Database) =>
+    db.prepare(`
+      INSERT INTO conversations (id, project_id, title, mode, branch, branch_type, source_message_id, parent_conversation_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+
+  getBranches: (db: Database.Database) =>
+    db.prepare('SELECT * FROM conversations WHERE parent_conversation_id = ? ORDER BY created_at ASC'),
+
+  getBySourceMessage: (db: Database.Database) =>
+    db.prepare('SELECT * FROM conversations WHERE source_message_id = ?'),
 }
 
 export const messageQueries = {

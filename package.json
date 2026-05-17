@@ -1,7 +1,7 @@
 {
   "name": "cortex",
   "productName": "Cortex",
-  "version": "5.0.0-alpha.1",
+  "version": "5.0.0",
   "description": "Cortex — The brain that knows your codebase",
   "main": "./out/main/index.js",
   "type": "module",
@@ -13,6 +13,8 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:mac": "electron-vite build && electron-builder --mac --publish never",
+    "dist:win": "electron-vite build && electron-builder --win --publish never",
+    "dist:all": "electron-vite build && electron-builder --mac --win --publish never",
     "test": "vitest run --config vitest.config.ts",
     "test:coverage": "vitest run --config vitest.config.ts --coverage",
     "test:ui": "vitest run --config vitest.config.ui.ts",
@@ -38,6 +40,7 @@
     "remark-gfm": "^4.0.1",
     "remark-github-markdown-alerts": "^1.2.2",
     "turndown": "^7.2.2",
+    "use-sync-external-store": "^1.6.0",
     "web-tree-sitter": "^0.26.6",
     "xlsx": "^0.18.5",
     "zustand": "^5.0.0"

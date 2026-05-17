@@ -16,10 +16,11 @@ export interface TrainingPipeline {
 }
 
 export interface PipelineContext {
-  projectId?: string // undefined = all projects
+  projectId?: string
   trigger: TriggerType
   lastRunAt: number | null
   eventsSinceLastRun: number
+  abortSignal?: AbortSignal
 }
 
 export interface PipelineResult {

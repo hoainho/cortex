@@ -6,7 +6,7 @@ import { initDefaultVariant } from '../services/query-optimizer'
 import { getCompressionStats } from '../services/skills/efficiency/cost-tracker'
 import { optimizePrompt } from '../services/skills/learning/prompt-optimizer'
 import { getAutoScanProgress, getAutoScanConfig, setAutoScanConfig, onActivityUpdate, syncEnabledFromDb } from '../services/skills/learning/autoscan-engine'
-import { triggerManualTraining } from '../services/training/training-engine'
+import { triggerManualTraining, setPipelineEnabled } from '../services/training/training-engine'
 import { getRunHistory } from '../services/training/training-db'
 import { checkForUpdates } from '../services/updater-service'
 import { getAuditLog } from '../services/audit-service'
@@ -91,6 +91,9 @@ export function registerLearningIPC(ipcMain: IpcMain, getMainWindow: () => Brows
   ipcMain.handle('autoscan:config:get', () => getAutoScanConfig())
   ipcMain.handle('autoscan:config:set', (_event, config: Record<string, unknown>) => {
     setAutoScanConfig(config)
+    if (typeof config.enabled === 'boolean') {
+      setPipelineEnabled('autoscan', config.enabled)
+    }
     return true
   })
   ipcMain.handle('autoscan:trigger', (_event, projectId: string) => {

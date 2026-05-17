@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, memo } from 'react'
 import { Search, Brain, Globe, Zap, Loader2, Check, SkipForward, AlertCircle, ChevronDown, ChevronRight, Shield, Database, HardDrive, ListOrdered, Route, Bot, Cpu, GitBranch, Wrench } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
@@ -89,7 +89,7 @@ function StepRow({ step, index }: { step: ThinkingStepData; index: number }) {
   )
 }
 
-export function ThinkingProcess({ steps }: ThinkingProcessProps) {
+export const ThinkingProcess = memo(function ThinkingProcess({ steps }: ThinkingProcessProps) {
   const [collapsed, setCollapsed] = useState(false)
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -141,4 +141,4 @@ export function ThinkingProcess({ steps }: ThinkingProcessProps) {
       )}
     </div>
   )
-}
+})

@@ -9,6 +9,7 @@ import type { ContextSource, ContextRef, FetchedContext } from './context-source
 import { getServiceConfig } from './settings-service'
 import { getDb } from './db'
 import { callToolByServerName } from './skills/mcp/mcp-manager'
+import { sanitizeGitHubContent } from './validator'
 
 const GITHUB_API = 'https://api.github.com'
 
@@ -62,6 +63,8 @@ async function fetchGitHubIssue(
     // Comments are supplementary — don't fail the whole fetch
   }
 
+  issue.body = sanitizeGitHubContent(issue.body || '')
+  comments = comments.map(c => ({ ...c, body: sanitizeGitHubContent(c.body || '') }))
   return { issue, comments }
 }
 
@@ -79,6 +82,7 @@ async function fetchGitHubPR(
     // Files list is supplementary
   }
 
+  pr.body = sanitizeGitHubContent(pr.body || '')
   return { pr, files }
 }
 

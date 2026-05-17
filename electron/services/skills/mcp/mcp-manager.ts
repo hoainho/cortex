@@ -3,7 +3,8 @@ import { createMCPClient, type MCPClient, type MCPClientConfig, type MCPTool, ty
 import { createMCPSkillsFromServer } from './mcp-adapter'
 import { registerSkill, unregisterSkill } from '../skill-registry'
 import { MCP_PRESETS, type MCPPreset } from './mcp-presets'
-import { setServiceConfig, getServiceConfig } from '../../settings-service'
+import { setServiceConfig, getServiceConfig, setGitHubPAT } from '../../settings-service'
+import { updateAllGitHubTokens } from '../../git-service'
 
 export interface MCPServerConfig {
   id: string
@@ -502,6 +503,15 @@ export function getPresetStatuses(): Array<MCPPreset & { installed: boolean; con
   })
 }
 
+function propagateGitHubTokenIfPresent(env: Record<string, string>): void {
+  const token = env.GITHUB_PERSONAL_ACCESS_TOKEN || env.GITHUB_TOKEN || env.GH_TOKEN
+  if (token) {
+    setGitHubPAT(token)
+    updateAllGitHubTokens(token)
+    console.log(`[MCPManager] Propagated GitHub token to global PAT and all per-repo tokens`)
+  }
+}
+
 export async function installPreset(
   presetId: string,
   envValues: Record<string, string>
@@ -512,6 +522,7 @@ export async function installPreset(
   const encryptKeys = preset.envVars.filter(v => v.encrypted).map(v => v.name)
   if (Object.keys(envValues).length > 0) {
     setServiceConfig(`mcp:${preset.id}`, envValues, encryptKeys)
+    propagateGitHubTokenIfPresent(envValues)
   }
 
   const envObj: Record<string, string> = {}
@@ -544,6 +555,56 @@ export async function installPreset(
 
   const statuses = listMCPServers()
   return statuses.find(s => s.id === server.id) || server
+}
+
+export async function updateMCPServerEnv(serverId: string, envPatch: Record<string, string>): Promise<{ success: boolean; error?: string }> {
+  ensureSchema()
+  const db = getDb()
+  const raw = db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(serverId) as MCPServerRow | undefined
+  if (!raw) return { success: false, error: 'Server not found' }
+
+  const existing: Record<string, string> = raw.env ? JSON.parse(raw.env) : {}
+  const merged = { ...existing, ...envPatch }
+  db.prepare('UPDATE mcp_servers SET env = ? WHERE id = ?').run(JSON.stringify(merged), serverId)
+
+  await disconnectMCPServer(serverId).catch(() => {})
+  return connectMCPServer(serverId)
+}
+
+export function findMCPServerByPresetId(presetId: string): MCPServerStatus | undefined {
+  ensureSchema()
+  const db = getDb()
+  const preset = MCP_PRESETS.find(p => p.id === presetId)
+  if (!preset) return undefined
+
+  const packageFragment = preset.npmPackage.split('/').pop() || preset.npmPackage
+
+  const row: MCPServerRow | undefined = (() => {
+    const byExactName = db.prepare('SELECT * FROM mcp_servers WHERE name = ? AND enabled = 1').get(preset.name) as MCPServerRow | undefined
+    if (byExactName) return byExactName
+    const byArgs = db.prepare('SELECT * FROM mcp_servers WHERE args LIKE ? AND enabled = 1').get(`%${packageFragment}%`) as MCPServerRow | undefined
+    if (byArgs) return byArgs
+    const all = db.prepare('SELECT * FROM mcp_servers WHERE enabled = 1').all() as MCPServerRow[]
+    return all.find(r => r.name?.toLowerCase().includes('slack') && !r.name?.toLowerCase().includes('bot'))
+  })()
+
+  if (!row) return undefined
+  const mapped = mapRow(row)
+  const status = serverStatus.get(mapped.id)
+  return {
+    id: mapped.id,
+    name: mapped.name,
+    transportType: mapped.transportType,
+    command: mapped.command,
+    args: mapped.args,
+    serverUrl: mapped.serverUrl,
+    enabled: mapped.enabled,
+    connected: status?.connected ?? false,
+    toolCount: status?.toolCount ?? 0,
+    resourceCount: status?.resourceCount ?? 0,
+    lastChecked: status?.lastChecked ?? 0,
+    lastError: status?.lastError,
+  }
 }
 
 export async function shutdownAllMCP(): Promise<void> {

@@ -4,7 +4,6 @@ import { getDb, repoQueries, chunkQueries } from '../services/db'
 import { getProjectAtlassianConfig, setProjectAtlassianConfig, clearProjectAtlassianConfig, hasProjectAtlassianConfig } from '../services/atlassian-config-service'
 import { testJiraConnection, fetchJiraProjects, fetchProjectIssues, issueToChunkContent } from '../services/jira-service'
 import { fetchSpaces, fetchPagesBySpace, pageToChunkContent } from '../services/confluence-service'
-import { getGitHubPAT, setGitHubPAT } from '../services/settings-service'
 import { embedProjectChunks } from '../services/embedder'
 
 export function registerAtlassianIPC(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | null): void {
@@ -90,9 +89,6 @@ export function registerAtlassianIPC(ipcMain: IpcMain, getMainWindow: () => Brow
       return { success: false, error: err instanceof Error ? err.message : 'Import thất bại' }
     }
   })
-
-  ipcMain.handle('github:getPAT', () => !!getGitHubPAT())
-  ipcMain.handle('github:setPAT', (_event, token: string) => { setGitHubPAT(token); return true })
 
   ipcMain.handle('confluence:getSpaces', async (_event, projectId: string) => {
     const config = getProjectAtlassianConfig(projectId)
