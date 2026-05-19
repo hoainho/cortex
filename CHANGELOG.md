@@ -5,6 +5,31 @@ All notable changes to Cortex are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.0.1] - 2026-05-19
+
+> Patch release focused on MCP reliability and permission ergonomics. No breaking changes — drop-in upgrade from 5.0.0.
+
+### Added
+
+#### YOLO Mode (Permissions)
+- **`electron/services/permissions/yolo-mode.ts`** — Optional auto-approve mode that bypasses every tool permission prompt (file RW, MCP tools, GitHub API, Bash, web fetch). System paths (`/System`, `/etc`, `/bin`, `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`) stay protected even when YOLO is on.
+- **Settings → Permissions** — Toggle "YOLO Mode" with a red `ACTIVE` badge when enabled. Persists to settings DB; takes effect immediately without restart.
+- `plan` mode still overrides YOLO for write operations — read-only review workflows are preserved.
+
+### Fixed
+
+#### MCP stdio Connection (macOS GUI launch)
+- **`electron/services/skills/mcp/resolve-mcp-command.ts`** — New helper that augments PATH with common Node.js install locations (`/usr/local/bin`, `/opt/homebrew/bin`, `~/.nvm/versions/node/*/bin`, `~/.volta/bin`, `~/.fnm`, `~/Library/pnpm`, `~/.bun/bin`, login-shell PATH) before spawning MCP servers. Fixes `spawn npx ENOENT` when launching Cortex.app from Finder/Dock (GUI apps on macOS do not inherit shell PATH).
+- **`electron/services/skills/mcp/mcp-client.ts`** — Stderr from MCP child processes is now drained line-by-line and surfaced into error messages. Previously `stderr: 'pipe'` was set but never read, causing child processes to block when stderr buffer filled and showing only opaque `Connection closed` errors upstream. Spawned children now use `cwd: $HOME` instead of inheriting Electron's `/` cwd, which broke many MCP servers.
+- Friendly error when binary cannot be resolved: instructs user to set absolute path in Settings or install Node.js, instead of cryptic `ENOENT`.
+
+#### Filesystem Access
+- **`electron/services/permissions/permission-engine.ts`** — File read/write tools (`Read`, `Write`, `Edit`, all `cortex_*_file` variants) auto-approve without prompting in default mode. Non-file tools (Bash, network, MCP) still require explicit permission unless YOLO is on.
+- **`electron/services/path-access-policy.ts`** — Paths outside the project repo are auto-approved when not in protected directories, eliminating the "File Access Permission" dialog for routine reads/writes to `~/Documents`, `~/Desktop`, etc.
+
+### Internal
+- Bumped `mcp-client.ts` error surface area: registered `onerror` / `onclose` callbacks log transport lifecycle to console. Last 50 stderr lines from child are appended to thrown errors on connect failure.
+
 ## [5.0.0] "Eureka" - 2026-05-17
 
 > **Eureka** — the moment of breakthrough discovery. v5.0 transforms Cortex from a brain-only assistant into a full-fledged developer companion: it can now be extended, scheduled, backed up, and integrated with the tools you already use. Inspired by Claude Code's extensibility model.

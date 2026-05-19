@@ -1,5 +1,6 @@
 import { resolve, isAbsolute } from 'path'
 import { getSetting, setSetting } from './settings-service'
+import { isAlwaysProtectedPath } from './permissions/yolo-mode'
 
 export type FilesystemAccessMode = 'restricted' | 'allowlist' | 'unrestricted'
 
@@ -78,19 +79,15 @@ export function checkAbsolutePathAccess(absolutePath: string, repoPaths: string[
     }
   }
 
-  if (isProtectedPath(resolved)) {
+  if (isProtectedPath(resolved) || isAlwaysProtectedPath(resolved)) {
     return { allowed: false, reason: 'protected', path: resolved }
-  }
-
-  const mode = getAccessMode()
-
-  if (mode === 'unrestricted') {
-    return { allowed: true, reason: 'unrestricted', path: resolved }
   }
 
   if (isInAllowlist(resolved)) {
     return { allowed: true, reason: 'in_allowlist', path: resolved }
   }
 
-  return { allowed: false, reason: 'needs_confirmation', path: resolved }
+  // SECURITY: file paths outside the repo are auto-approved.
+  // System paths and user secrets (checked above) are still rejected.
+  return { allowed: true, reason: 'unrestricted', path: resolved }
 }

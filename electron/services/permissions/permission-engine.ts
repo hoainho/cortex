@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { parsePermissionRules, ruleMatchesToolCall } from './permission-parser'
+import { isYoloModeEnabled } from './yolo-mode'
 import type { PermissionRule, PermissionDecision, PermissionMode, PermissionConfig, PermissionAction, PermissionScope } from './types'
 
 let activeMode: PermissionMode = 'default'
@@ -42,6 +43,19 @@ export function getPermissionMode(): PermissionMode {
   return activeMode
 }
 
+const FILE_RW_TOOLS = new Set<string>([
+  'Read', 'Write', 'Edit',
+  'cortex_read_file', 'cortex_read_files', 'cortex_read_document',
+  'cortex_write_file',
+  'cortex_edit_file', 'cortex_edit_file_lines', 'cortex_edit_files',
+  'cortex_list_directory', 'cortex_grep_search',
+  'cortex_move_file', 'cortex_delete_file',
+])
+
+function isFileReadWriteTool(toolName: string): boolean {
+  return FILE_RW_TOOLS.has(toolName)
+}
+
 export function evaluate(toolName: string, toolInput?: string): PermissionDecision {
   const cacheKey = `${toolName}:${toolInput ?? ''}`
   if (ruleCache.has(cacheKey)) return ruleCache.get(cacheKey)!
@@ -52,8 +66,22 @@ export function evaluate(toolName: string, toolInput?: string): PermissionDecisi
     return decision
   }
 
+  // SECURITY: YOLO mode auto-allows every tool. System paths are still
+  // protected separately in path-access-policy.ts (kept out of cache so
+  // toggling the setting takes effect immediately).
+  if (isYoloModeEnabled()) {
+    return { action: 'allow', reason: 'YOLO mode: auto-approved' }
+  }
+
   if (activeMode === 'acceptEdits' && ['Edit', 'Write'].includes(toolName)) {
     const decision: PermissionDecision = { action: 'allow', reason: 'acceptEdits mode' }
+    ruleCache.set(cacheKey, decision)
+    return decision
+  }
+
+  // SECURITY: file RW tools are auto-allowed; Bash/network/other tools still gated.
+  if (isFileReadWriteTool(toolName)) {
+    const decision: PermissionDecision = { action: 'allow', reason: 'file read/write auto-approved' }
     ruleCache.set(cacheKey, decision)
     return decision
   }

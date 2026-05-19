@@ -20,6 +20,7 @@ import { getPerplexitySession, isPerplexityLoggedIn, executePerplexityTool } fro
 import { getGitHubPAT, setGitHubPAT, clearServiceConfig } from '../services/settings-service'
 import { updateAllGitHubTokens } from '../services/git-service'
 import { getAccessMode, setAccessMode, getPathAllowlist, addToAllowlist, removeFromAllowlist } from '../services/path-access-policy'
+import { isYoloModeEnabled, setYoloMode } from '../services/permissions/yolo-mode'
 
 export function registerSettingsIPC(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('settings:getProxyConfig', () => getProxyConfig())
@@ -182,6 +183,12 @@ export function registerSettingsIPC(ipcMain: IpcMain, getMainWindow: () => Brows
   ipcMain.handle('openrouter:setApiKey', (_event, key: string) => { setOpenRouterApiKey(key); return true })
   ipcMain.handle('openrouter:setEnabled', (_event, enabled: boolean) => { setOpenRouterEnabled(enabled); return true })
   ipcMain.handle('openrouter:test', async () => testOpenRouterConnection())
+
+  ipcMain.handle('yolo:get', () => isYoloModeEnabled())
+  ipcMain.handle('yolo:set', (_event, enabled: boolean) => {
+    setYoloMode(enabled)
+    return isYoloModeEnabled()
+  })
 
   ipcMain.handle('fs-policy:getAccessMode', () => getAccessMode())
   ipcMain.handle('fs-policy:setAccessMode', (_event, mode: string) => {

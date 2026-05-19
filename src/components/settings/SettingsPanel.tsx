@@ -355,6 +355,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
 
   const [fsAccessMode, setFsAccessMode] = useState<'restricted' | 'allowlist' | 'unrestricted'>('restricted')
   const [fsAllowlist, setFsAllowlist] = useState<string[]>([])
+  const [yoloMode, setYoloModeState] = useState(false)
 
   // Advanced collapsed
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -461,6 +462,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         if (mode) setFsAccessMode(mode as 'restricted' | 'allowlist' | 'unrestricted')
         const list = await window.electronAPI.getFsAllowlist()
         if (list) setFsAllowlist(list)
+        const yolo = await window.electronAPI.getYoloMode()
+        setYoloModeState(Boolean(yolo))
       } catch {}
     }
     load()
@@ -1173,14 +1176,51 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             <div className="flex items-center gap-2 mb-3">
               <Shield size={16} className="text-[var(--accent-primary)]" />
               <h3 className="text-[13px] font-semibold text-[var(--text-primary)] uppercase tracking-wider">
-                Filesystem Access
+                Permissions
               </h3>
             </div>
 
             <div className="space-y-3">
+              <label className={cn(
+                'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all',
+                yoloMode
+                  ? 'border-[var(--status-error-text)] bg-[color-mix(in_srgb,var(--status-error-text)_8%,transparent)]'
+                  : 'border-[var(--border-secondary)] hover:bg-[var(--bg-secondary)]'
+              )}>
+                <input
+                  type="checkbox"
+                  checked={yoloMode}
+                  onChange={async (e) => {
+                    const next = e.target.checked
+                    setYoloModeState(next)
+                    try {
+                      await window.electronAPI.setYoloMode(next)
+                    } catch {
+                      setYoloModeState(!next)
+                    }
+                  }}
+                  className="mt-0.5 accent-[var(--status-error-text)]"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] font-semibold text-[var(--text-primary)]">YOLO Mode</span>
+                    {yoloMode && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[var(--status-error-text)] text-white">
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-[var(--text-tertiary)] mt-1 leading-relaxed">
+                    Auto-approve every tool call without prompting (file access, MCP tools, GitHub API, web fetch, Bash).
+                    System paths (<code className="text-[10px]">/System</code>, <code className="text-[10px]">/etc</code>) and secrets
+                    (<code className="text-[10px]">~/.ssh</code>, <code className="text-[10px]">~/.aws</code>, <code className="text-[10px]">~/.gnupg</code>) stay protected.
+                  </p>
+                </div>
+              </label>
+
               <div>
                 <label className="block text-[12px] text-[var(--text-secondary)] mb-2">
-                  Access Mode
+                  Filesystem Access Mode
                 </label>
                 <div className="space-y-1.5">
                   {([

@@ -332,6 +332,8 @@ declare global {
       openFileDialog: () => Promise<ChatAttachment[]>
       openFilesFromPaths: (paths: string[]) => Promise<ChatAttachment[]>
 
+      getYoloMode: () => Promise<boolean>
+      setYoloMode: (enabled: boolean) => Promise<boolean>
       getFsAccessMode: () => Promise<string>
       setFsAccessMode: (mode: string) => Promise<boolean>
       getFsAllowlist: () => Promise<string[]>

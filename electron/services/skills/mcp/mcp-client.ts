@@ -2,6 +2,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { homedir } from 'os'
+import { resolveMcpCommand } from './resolve-mcp-command'
 
 /** Default timeout for MCP tool calls: 5 minutes (browser automation, long tasks) */
 const DEFAULT_TOOL_TIMEOUT_MS = 300_000
@@ -54,16 +56,50 @@ export function createMCPClient(config: MCPClientConfig): MCPClient {
       if (config.transportType === 'stdio') {
         if (!config.command) throw new Error('stdio transport requires command')
 
-        transport = new StdioClientTransport({
-          command: config.command,
+        const resolved = resolveMcpCommand(config.command, config.env)
+        const label = `${resolved.command} ${(config.args || []).join(' ')}`.trim()
+
+        const stdioTransport = new StdioClientTransport({
+          command: resolved.command,
           args: config.args || [],
-          env: { ...process.env, ...config.env } as Record<string, string>,
+          env: resolved.env,
+          cwd: homedir(),
           stderr: 'pipe'
         })
+        transport = stdioTransport
 
-        await client.connect(transport)
+        stdioTransport.onerror = (err) => {
+          console.error(`[MCPClient][${label}] transport error:`, err)
+        }
+        stdioTransport.onclose = () => {
+          console.warn(`[MCPClient][${label}] transport closed`)
+        }
+
+        const stderrStream = stdioTransport.stderr
+        if (stderrStream) {
+          const buffered: string[] = []
+          stderrStream.on('data', (chunk: Buffer | string) => {
+            const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+            const lines = text.split(/\r?\n/).filter(Boolean)
+            for (const line of lines) {
+              buffered.push(line)
+              if (buffered.length > 50) buffered.shift()
+              console.error(`[MCPClient][${label}][stderr] ${line}`)
+            }
+          })
+          ;(stdioTransport as unknown as { _stderrTail?: string[] })._stderrTail = buffered
+        }
+
+        try {
+          await client.connect(stdioTransport)
+        } catch (connectErr) {
+          const tail = (stdioTransport as unknown as { _stderrTail?: string[] })._stderrTail || []
+          const message = connectErr instanceof Error ? connectErr.message : String(connectErr)
+          const detail = tail.length ? `\nstderr tail:\n${tail.slice(-10).join('\n')}` : ''
+          throw new Error(`${message}${detail}`)
+        }
         connected = true
-        console.log('[MCPClient] Connected via stdio:', config.command, config.args?.join(' ') || '')
+        console.log('[MCPClient] Connected via stdio:', label)
       } else {
         if (!config.serverUrl) throw new Error('SSE transport requires serverUrl')
 
