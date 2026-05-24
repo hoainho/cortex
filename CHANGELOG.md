@@ -5,6 +5,23 @@ All notable changes to Cortex are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.0.2] - 2026-05-24
+
+> Docs-only patch release. Ships a high-signal `AGENTS.md` so any AI coding agent (Claude Code, OpenCode, Cursor, …) gets the same persistent context the first time it opens the repo. No code changes, no API changes — drop-in upgrade from 5.0.1.
+
+### Added
+
+#### AGENTS.md — persistent agent context
+- **`AGENTS.md`** — restructured from a thin managed-block file into a 12-section guide loaded at the start of every agent session. Sections cover: project snapshot, non-obvious commands, repo map, code-style rules (TS strict, ESM, Zustand-only state, Tailwind, IPC validation, log format), seven architectural invariants (`HybridVectorStore`, agent pool backoff, circuit breaker, resource lock, hooks system, three-tier memory, permission engine), Karpathy's four working principles ([source](https://github.com/multica-ai/andrej-karpathy-skills)), verification gates from [Anthropic's Claude Code best practices](https://www.anthropic.com/engineering/claude-code-best-practices), Explore → Plan → Implement workflow, eight real gotchas (macOS GUI PATH, MCP stderr drain, Voyage / GitHub Models rate limits, Qdrant optionality, brain snapshots, `filesystem_unrestricted_mode`, AutoScan idle), repo etiquette, ask-vs-act decision table, common failure patterns.
+- The `OPENCODE-MEMORY` (nano-brain) and `RTK` managed blocks are preserved verbatim with their `<!-- … MANAGED BLOCK … -->` markers, so `nano-brain init` and `rtk-setup` continue to own them.
+
+### Changed
+
+- **`.gitignore`** — removed `AGENTS.md` from the ignore list. The file is now tracked so the whole team and any cloned-fresh agent gets the same context. `.opencode/`, `.sisyphus/`, and `ai/` stay ignored (they are per-machine state).
+
+### Why
+Per Anthropic's guidance, `AGENTS.md` / `CLAUDE.md` should be short, high-signal, and contain only things an agent *cannot infer from the code* — build commands, code-style overrides, architectural invariants, non-obvious gotchas. The previous file shipped only two managed blocks, so fresh agents repeatedly tripped on issues already documented in `git log` (GUI-launch PATH, MCP stderr, raw `fetch` bypassing agent-pool, etc.). This release fixes that by checking the guidance into the repo.
+
 ## [5.0.1] - 2026-05-19
 
 > Patch release focused on MCP reliability and permission ergonomics. No breaking changes — drop-in upgrade from 5.0.0.

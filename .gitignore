@@ -11,7 +11,6 @@ cortex-data/
 .opencode/
 .sisyphus/
 ai/
-AGENTS.md
 
 # Build cache
 *.tsbuildinfo
